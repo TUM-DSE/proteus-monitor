@@ -89,6 +89,7 @@ struct aligned_allocator {
 
 namespace xcl {
 std::vector<cl::Device> get_xil_devices();
+std::vector<cl::Device> get_intel_devices();
 std::vector<cl::Device> get_devices(const std::string& vendor_name);
 cl::Device find_device_bdf(const std::vector<cl::Device>& devices, const std::string& bdf);
 std::string convert_size(size_t size);

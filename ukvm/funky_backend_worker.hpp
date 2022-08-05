@@ -24,7 +24,7 @@ namespace funky_backend {
   /**
    * Initialize and allocate a memory space on FPGA to the guest 
    */
-  int handle_memory_request(struct ukvm_hv *hv, funky_backend::XoclContext* context, funky_msg::request& req)
+  int handle_memory_request(struct ukvm_hv *hv, funky_backend::ClContext* context, funky_msg::request& req)
   {
     DEBUG_STREAM("received a MEMORY request.");
 
@@ -48,7 +48,7 @@ namespace funky_backend {
   /*
    * Transfer data between guest memory and FPGA
    **/
-  int handle_transfer_request(struct ukvm_hv *hv, funky_backend::XoclContext* context, funky_msg::request& req)
+  int handle_transfer_request(struct ukvm_hv *hv, funky_backend::ClContext* context, funky_msg::request& req)
   {
     DEBUG_STREAM("received a TRANSFER request.");
 
@@ -90,7 +90,7 @@ namespace funky_backend {
   /**
    * Execute a kernel on FPGA
    */
-  int handle_exec_request(struct ukvm_hv *hv, funky_backend::XoclContext* context, funky_msg::request& req)
+  int handle_exec_request(struct ukvm_hv *hv, funky_backend::ClContext* context, funky_msg::request& req)
   {
     DEBUG_STREAM("received EXEC request. ");
 
@@ -153,7 +153,7 @@ namespace funky_backend {
   /**
    * Wait for a completion of all ongoing tasks running on FPGA
    */
-  int handle_sync_request(struct ukvm_hv *hv, funky_backend::XoclContext* context, funky_msg::request& req)
+  int handle_sync_request(struct ukvm_hv *hv, funky_backend::ClContext* context, funky_msg::request& req)
   {
     // TIMER_START(2);
     DEBUG_STREAM("received a SYNC request.");
@@ -208,7 +208,7 @@ namespace funky_backend {
    *
    * @return the total number of retired requests. 
    */
-  int handle_fpga_requests(struct ukvm_hv *hv, funky_backend::XoclContext* ctx)
+  int handle_fpga_requests(struct ukvm_hv *hv, funky_backend::ClContext* ctx)
   {
     int retired_reqs=0;
     using namespace funky_msg;
@@ -371,8 +371,8 @@ namespace funky_backend {
 
     private:
       struct fpga_thr_info m_thr_info;
-      funky_backend::XoclContext m_fpga_context;
-      std::vector<uint8_t> m_save_data; 
+      funky_backend::AoclContext m_fpga_context;
+      std::vector<uint8_t> m_save_data;
       buffer::Reader<struct thr_msg> msg_read_queue;
       buffer::Writer<struct thr_msg> msg_write_queue;
       bool fpga_sync_flag;
