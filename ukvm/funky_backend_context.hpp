@@ -687,7 +687,7 @@ namespace funky_backend {
         //       Currently, only one device (devices[0]) is assigned to the guest.
         auto devices = xcl::get_xil_devices();
         if(devices.size() == 0) {
-          std::cout << "Error: no device is found.\n";
+          std::cout << "Error: no xilinx device is found.\n";
           exit(EXIT_FAILURE);
         }
 
@@ -715,7 +715,7 @@ namespace funky_backend {
 
         /* program bistream to the device (FPGA) */
         program = std::make_unique<cl::Program>(context, p_devices, bins, nullptr, &err);
-        program.get()->build();
+        //program.get()->build();
 
         return err;
       }
@@ -731,7 +731,7 @@ namespace funky_backend {
         //       Currently, only one device (devices[0]) is assigned to the guest.
         auto devices = xcl::get_intel_devices();
         if(devices.size() == 0) {
-          std::cout << "Error: no device is found.\n";
+          std::cout << "Error: no intel device is found.\n";
           exit(EXIT_FAILURE);
         }
 
@@ -759,7 +759,7 @@ namespace funky_backend {
 
         /* program bistream to the device (FPGA) */
         program = std::make_unique<cl::Program>(context, p_devices, bins, nullptr, &err);
-        program.get()->build();
+        program.get()->build(); //clBuildProgram
 
         return err;
       }
