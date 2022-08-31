@@ -143,7 +143,7 @@ if [ "${ENABLE_FUNKY}" = "yes" ]; then
   FUNKY_OBJS=
   FUNKY_HEADERS=
   FUNKY_CPPFLAGS="-Wall -O0 -g -std=c++17"
-  FUNKY_INCLUDES="-I/tools/Intel/intelFPGA_pro/20.2/hld/include/ -I${XILINX_XRT}/include -lopencv_core -lopencv_imgcodecs -lopencv_imgproc -lopencv_highgui -lopencv_ml"
+  FUNKY_INCLUDES="-I/tools/Intel/intelFPGA_pro/20.2/hld/include/ -I${XILINX_XRT}/include"
   add_funky_obj funky_backend_core.o funky_xcl2.o
   add_funky_header funky_backend_core.h funky_xcl2.hpp
 else

@@ -170,7 +170,7 @@ namespace funky_backend {
             exit(1);
           }
 
-          event_list.push_back((cl::Event) event_in_map->second());
+          event_list.push_back((cl::Event) events[event_list_ids[i]]);
         }
 
         // return event_list;
