@@ -63,7 +63,7 @@ std::vector<cl::Device> get_xil_devices() {
 }
 
 std::vector<cl::Device> get_intel_devices() {
-    return get_devices("Intel(R) FPGA Emulation Platform for OpenCL(TM)");
+    return get_devices("Intel(R) FPGA SDK for OpenCL(TM)");
 }
 
 cl::Device find_device_bdf(const std::vector<cl::Device>& devices, const std::string& bdf) {
