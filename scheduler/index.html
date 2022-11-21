@@ -1,23 +1,75 @@
 <!DOCTYPE html>
+<style>
+    .container {
+        display: flex;
+    }
+</style>
 <html lang="en">
-  <head>
+
+<head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta http-equiv="X-UA-Compatible" content="ie=edge" />
     <title>Document</title>
-  </head>
-  <body>
-    <form
-      enctype="multipart/form-data"
-      action="http://localhost:8080/upload"
-      method="post"
-    >
-      <input type="file" name="myFile" />
-      <input type="radio" id="1" name="Priority" value="1" required/>
-      <label for="1">Low</label>
-      <input type="radio" id="0" name="Priority" value="0"/>
-      <label for="0">High</label>
-      <input type="submit" value="upload" />
+</head>
+
+<body>
+    <form enctype="multipart/form-data" action="http://localhost:8080/upload" method="post">
+        <div class="container">
+            <label for="priorityContainer">Task priority: </label>
+            <div id="priorityContainer">
+                <input type="radio" id="1" name="Priority" value="1" required />
+                <label for="1">Low</label>
+                <input type="radio" id="0" name="Priority" value="0" />
+                <label for="0">High</label>
+            </div>
+        </div>
+        <button id="addUploadFiledButton" type="button">Add Bitstream</button>
+        <div id="bitstreamUpload">
+            <div>
+                <label for="bitstreamInput">Compiled bitstream: </label>
+                <input type="file" name="bitstream" id="bitstreamInput" />
+                <label for="frequencyInput">Frequency of bitstream: </label>
+                <input type="number" id="frequencyInput" name="frequency" required />
+            </div>
+        </div>
+        <input type="submit" value="upload" />
     </form>
-  </body>
+</body>
+<script>
+    function addUploadField() {
+        const divContainer = document.createElement("div");
+
+        const bitstreamLabel = document.createElement("label");
+        bitstreamLabel.setAttribute("for", "bitstreamLabel");
+        bitstreamLabel.innerHTML = "Compiled bitstream:";
+
+        divContainer.appendChild(bitstreamLabel);
+
+        const bitstreamInput = document.createElement("input");
+        bitstreamInput.setAttribute("type", "file");
+        bitstreamInput.setAttribute("name", "bitstream");
+        bitstreamInput.setAttribute("id", "bitstreamInput");
+
+        divContainer.appendChild(bitstreamInput);
+
+        const frequencyLabel = document.createElement("label");
+        frequencyLabel.setAttribute("for", "frequencyInput");
+        frequencyLabel.innerHTML = "Frequency of bitstream:";
+
+        divContainer.appendChild(frequencyLabel);
+
+        const frequencyInput = document.createElement("input");
+        frequencyInput.setAttribute("type", "number");
+        frequencyInput.setAttribute("id", "frequencyInput");
+        frequencyInput.setAttribute("name", "frequency");
+        frequencyInput.required = true;
+
+        divContainer.appendChild(frequencyInput);
+
+        document.getElementById("bitstreamUpload").appendChild(divContainer);
+    }
+    document.getElementById("addUploadFiledButton").addEventListener("click", addUploadField);
+</script>
+
 </html>
