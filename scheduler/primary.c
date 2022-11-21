@@ -18,6 +18,9 @@
 #define BIN_PATH_LEN	256
 #define ARGS_LEN	128
 #define FRONT_CMD_LEN	400
+#define FREQ_LEN	256 // TODO: Decide a suitable value.
+
+#define COMMA_SEP_STR ","
 
 //#define TIME_NCOM 1
 //#define TIME_TASK 1
@@ -57,13 +60,14 @@ enum msg_type {
 
 struct task {
 	uint32_t id;
-	char *bin_path;
-	char *bin_args;
+	char **bin_path; // == *bin_path[]
+	char **bin_args; // == *bin_args[]
 	uint8_t priority;
 	enum task_state state;
 	struct node *node;	// the node where the task has been deployed
 	struct task *next;
 	struct task *prev;
+	uint8_t num_bitstreams;
 #ifdef TIME_TASK
 	struct timespec tstart;
 	long secs;
@@ -159,9 +163,14 @@ static char *strdup(const char *s)
 /*
  * Create and initialize an entry for a new task
  */
-static struct task *create_new_task(char *path, uint8_t priority, char *args)
+static struct task *create_new_task(char *paths, uint8_t num_bitstreams, char *frequencies, uint8_t priority, char *args)
 {
 	struct task *new_task;
+
+	int entity_start, entity_end;
+	char *save_ptr;
+	char *path;
+	char **path_in_container;
 
 	new_task = malloc(sizeof(struct task));
 	if (!new_task) {
@@ -169,20 +178,34 @@ static struct task *create_new_task(char *path, uint8_t priority, char *args)
 		return NULL;
 	}
 
-	new_task->bin_path = strdup(path);
+	// Allocate an array for the paths.
+	new_task->bin_path = malloc(num_bitstreams * sizeof(char *));
 	if (!new_task->bin_path) {
 		free(new_task);
 		return NULL;
 	}
 
+	// Extract the paths.
+	for (path_in_container=new_task->bin_path,
+		 path=strtok_r(paths, COMMA_SEP_STR, &save_ptr);
+		 path != NULL;
+		 path = strtok_r(NULL, COMMA_SEP_STR, &save_ptr), path_in_container++) {
+			*path_in_container = strdup(path);
+			if (!*(path_in_container)) {
+				free(new_task);
+				return NULL;
+			}
+	}
+
 	new_task->priority = priority;
-	new_task->node = NULL;;
+	new_task->node = NULL;
 	new_task->state = ready;
 	new_task->next = NULL;
 	new_task->prev = NULL;
 	if (args[0]  == 0) {
 		new_task->bin_args = NULL;
 	} else {
+		// TODO: Handle args too.
 		new_task->bin_args = strdup(args);
 		if (!new_task->bin_args) {
 			free(new_task->bin_path);
@@ -234,18 +257,20 @@ static void *get_cmd_front(void *arg)
 	 * New task should start with '/' since full path is required.
 	 */
 	if (front_cmd[0] == 'N') {
+		uint8_t num_bitstreams = 0;
 		uint8_t prior = 2;
 		char path_bin[BIN_PATH_LEN] = {0};
+		char frequencies[FREQ_LEN] = {0}; // TODO: Use this.
 		char args[ARGS_LEN] = {0};
 
-		rc = sscanf(front_cmd, "New: %s priority: %hhu args: %[^\t\n]",
-				path_bin, &prior, args);
+		rc = sscanf(front_cmd, "New: %s num_bitstreams: %hhu frequencies: %s priority: %hhu args: %[^\t\n]",
+				path_bin, &num_bitstreams, frequencies, &prior, args);
 		if (rc < 2) {
 			err_print("Invalid command\n");
 			goto exit_front;
 		}
 
-		tsk_to_add = create_new_task(path_bin, prior, args);
+		tsk_to_add = create_new_task(path_bin, num_bitstreams, frequencies, prior, args);
 		if (!tsk_to_add) {
 			err_print("Could not create new task\n");
 			goto exit_front;
@@ -1136,8 +1161,8 @@ int main()
 #else
 				printf("\n");
 #endif
-				free(task_tmp->bin_path);
-				free(task_tmp->bin_args);
+				free(task_tmp->bin_path); // TODO: Change this for multiple bitstreams.
+				free(task_tmp->bin_args); // TODO: Change this for multiple bitstreams.
 				free(task_tmp);
 				break;
 			}
