@@ -1,8 +1,10 @@
-package raft
+package main
 
 import (
 	"fmt"
 	"io/ioutil"
+	"log"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -19,6 +21,8 @@ func uploadFile(w http.ResponseWriter, r *http.Request) {
 	// FormFile returns the first file for the given key `myFile`
 	// it also returns the FileHeader so we can get the Filename,
 	// the Header and the size of the file
+
+	arguments := r.FormValue("Arguments")
 
 	priorityString := r.FormValue("Priority")
 	priority, err := strconv.Atoi(priorityString)
@@ -47,8 +51,8 @@ func uploadFile(w http.ResponseWriter, r *http.Request) {
 		fmt.Printf("MIME Header: %+v\n", fileHeader.Header)
 		fmt.Printf("Frequency: %v\n", frequencies[index])
 
-        // Create a temporary file within our temp-images directory that follows
-        // a particular naming pattern
+		// Create a temporary file within our temp-images directory that follows
+		// a particular naming pattern
 		tempFile, err := ioutil.TempFile("/tmp/", "upload-*.ukvm")
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -74,15 +78,15 @@ func uploadFile(w http.ResponseWriter, r *http.Request) {
 
 	c, err := net.Dial("unix", SockAddr)
 	if err != nil {
-	    log.Fatal("Dial error", err)
+		log.Fatal("Dial error", err)
 	}
 
 	// TODO: Wouldn't it be better to serialize this?
-	s := fmt.Sprintf("New: %v num_bitstreams: %v frequencies: %v priority: %d", strings.Join(fileNames, ","), len(fileNames), strings.Join(frequencies, ","), priority)
+	s := fmt.Sprintf("New: %v num_bitstreams: %v frequencies: %v priority: %d args: %v", strings.Join(fileNames, ","), len(fileNames), strings.Join(frequencies, ","), priority, arguments)
 	fmt.Printf(s)
 	_, err = c.Write([]byte(s))
 	if err != nil {
-	    log.Fatal("Write error", err)
+		log.Fatal("Write error", err)
 	}
 	defer c.Close()
 }

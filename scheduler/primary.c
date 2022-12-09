@@ -61,13 +61,14 @@ enum msg_type {
 struct task {
 	uint32_t id;
 	char **bin_path; // == *bin_path[]
-	char **bin_args; // == *bin_args[]
+	char *bin_args; // Assumption: All bitstreams will have same args. 
 	uint8_t priority;
 	enum task_state state;
 	struct node *node;	// the node where the task has been deployed
 	struct task *next;
 	struct task *prev;
 	uint8_t num_bitstreams;
+	uint32_t *frequencies;
 #ifdef TIME_TASK
 	struct timespec tstart;
 	long secs;
@@ -167,16 +168,20 @@ static struct task *create_new_task(char *paths, uint8_t num_bitstreams, char *f
 {
 	struct task *new_task;
 
-	int entity_start, entity_end;
+	uint32_t frequency;
+	uint32_t *frequency_values;
+	int i;
 	char *save_ptr;
-	char *path;
-	char **path_in_container;
+	char *entity; // Either a path or a frequency. Reused.
+	char **entity_in_container; // Pointing to a path string.
 
 	new_task = malloc(sizeof(struct task));
 	if (!new_task) {
 		err_print("Out of memory while creating new struct task\n");
 		return NULL;
 	}
+
+	new_task->num_bitstreams = num_bitstreams;
 
 	// Allocate an array for the paths.
 	new_task->bin_path = malloc(num_bitstreams * sizeof(char *));
@@ -186,16 +191,28 @@ static struct task *create_new_task(char *paths, uint8_t num_bitstreams, char *f
 	}
 
 	// Extract the paths.
-	for (path_in_container=new_task->bin_path,
-		 path=strtok_r(paths, COMMA_SEP_STR, &save_ptr);
-		 path != NULL;
-		 path = strtok_r(NULL, COMMA_SEP_STR, &save_ptr), path_in_container++) {
-			*path_in_container = strdup(path);
-			if (!*(path_in_container)) {
+	for (entity_in_container=new_task->bin_path,
+		 entity=strtok_r(paths, COMMA_SEP_STR, &save_ptr);
+		 entity != NULL;
+		 entity = strtok_r(NULL, COMMA_SEP_STR, &save_ptr), entity_in_container++) {
+			*entity_in_container = strdup(entity);
+			if (!*(entity_in_container)) {
 				free(new_task);
 				return NULL;
 			}
 	}
+
+	// Allocate an array for the frequencies.
+	frequency_values = malloc(num_bitstreams * sizeof(int));
+
+	// Extract the frequencies.
+	for (i=0, entity=strtok_r(frequencies, COMMA_SEP_STR, &save_ptr);
+		 entity != NULL;
+		 entity = strtok_r(NULL, COMMA_SEP_STR, &save_ptr), i++) {
+			frequency = strtoul(entity, NULL, 0);
+			frequency_values[i] = frequency;
+	}
+	new_task->frequencies = frequency_values;
 
 	new_task->priority = priority;
 	new_task->node = NULL;
@@ -205,7 +222,6 @@ static struct task *create_new_task(char *paths, uint8_t num_bitstreams, char *f
 	if (args[0]  == 0) {
 		new_task->bin_args = NULL;
 	} else {
-		// TODO: Handle args too.
 		new_task->bin_args = strdup(args);
 		if (!new_task->bin_args) {
 			free(new_task->bin_path);
@@ -218,6 +234,41 @@ static struct task *create_new_task(char *paths, uint8_t num_bitstreams, char *f
 #endif
 
 	return new_task;
+}
+
+void free_task(struct task *task_to_free)
+{
+	uint8_t i=0;
+
+	for (i = task_to_free->num_bitstreams - 1; i > 0; --i)
+	{
+		free(task_to_free->bin_path[i]);
+	}
+	free(task_to_free->bin_path);
+	free(task_to_free->frequencies);
+	if (task_to_free->bin_args != NULL)
+	{
+		free(task_to_free->bin_args);
+	}
+	free(task_to_free);
+}
+
+void print_task(struct task *task_to_print)
+{
+	uint8_t i;
+
+	printf("Task id %d with state %d, priority %hhu, args %s, ", task_to_print->id, task_to_print->state, task_to_print->priority, task_to_print->bin_args ? task_to_print->bin_args : "");
+	printf("frequencies ");
+	for (i=0; i<task_to_print->num_bitstreams; i++)
+	{
+		printf("%d ", task_to_print->frequencies[i]);
+	}
+	printf(" and binaries at: ");
+	for (i=0; i<task_to_print->num_bitstreams; i++)
+	{
+		printf("%s ", task_to_print->bin_path[i]);
+	}
+	printf("\n");
 }
 
 /*
@@ -282,7 +333,8 @@ static void *get_cmd_front(void *arg)
 		nmsg = malloc(sizeof(struct notify_msg));
 		if (!nmsg) {
 			err_print("Out of memory for notify msg\n");
-			free(tsk_to_add);
+			// free(tsk_to_add);
+			free_task(tsk_to_add);
 			goto exit_front;
 		}
 		nmsg->type = task_new;
@@ -561,8 +613,8 @@ static int handle_node_comm(int epollfd, int con, int sched_efd, int snd_efd,
 			clock_gettime(CLOCK_MONOTONIC, &start);
 #endif
 			if (msg_node->type == deploy || msg_node->type == evict) {
-				rc = send_file(con, msg_node->tsk->bin_path,
-						msg_node->type, msg_node->tsk->id);
+				// rc = send_file(con, msg_node->tsk->bin_path,
+				// 		msg_node->type, msg_node->tsk->id);
 #ifdef TIME_NCOM
 				clock_gettime(CLOCK_MONOTONIC, &end);
 				printf("Sending command and binary took %ld ms\n",
@@ -961,7 +1013,8 @@ static void scheduler_algorithm(struct node *nhead, struct task *thead,
 	tsk_tmp = thead;
 	while(tsk_tmp) {
 #if !defined(TIME_NCOM) && !defined(TIME_ALGO) && !defined (TIME_TASK)
-		printf("Task id %d with state %d, priority %hhu and bin at %s and args %s\n", tsk_tmp->id,tsk_tmp->state, tsk_tmp->priority, tsk_tmp->bin_path, tsk_tmp->bin_args ? tsk_tmp->bin_args : "");
+		// printf("Task id %d with state %d, priority %hhu and bin at %s and args %s\n", tsk_tmp->id,tsk_tmp->state, tsk_tmp->priority, "", tsk_tmp->bin_args ? tsk_tmp->bin_args : "");
+		print_task(tsk_tmp);
 #endif
 		if (tsk_tmp->state == stopped) {
 			tsk_avail = tsk_tmp;
@@ -1161,9 +1214,10 @@ int main()
 #else
 				printf("\n");
 #endif
-				free(task_tmp->bin_path); // TODO: Change this for multiple bitstreams.
-				free(task_tmp->bin_args); // TODO: Change this for multiple bitstreams.
-				free(task_tmp);
+				free_task(task_tmp);
+				// free(task_tmp->bin_path); // TODO: Change this for multiple bitstreams.
+				// free(task_tmp->bin_args); // TODO: Change this for multiple bitstreams.
+				// free(task_tmp);
 				break;
 			}
 			case migration:
