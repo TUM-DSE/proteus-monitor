@@ -17,12 +17,11 @@
 #include "common.h"
 
 #define BIN_PATH_LEN	256
-#define FPGA_TYPE_LEN 32
 #define ARGS_LEN	128
 #define FRONT_CMD_LEN	400
+#define FREQ_LEN	256 // TODO: Decide a suitable value.
 
-redisContext *connection = NULL;
-int user_num = 0;
+#define COMMA_SEP_STR ","
 
 //#define TIME_NCOM 1
 //#define TIME_TASK 1
@@ -62,15 +61,15 @@ enum msg_type {
 
 struct task {
 	uint32_t id;
-	uint8_t num;
-	char **bin_path;
-	char *bin_args;
-	char **type;
+	char **bin_path; // == *bin_path[]
+	char *bin_args; // Assumption: All bitstreams will have same args. 
 	uint8_t priority;
 	enum task_state state;
 	struct node *node;	// the node where the task has been deployed
 	struct task *next;
 	struct task *prev;
+	uint8_t num_bitstreams;
+	uint32_t *frequencies;
 #ifdef TIME_TASK
 	struct timespec tstart;
 	long secs;
@@ -129,12 +128,6 @@ struct notify_msg {
 	};
 };
 
-enum fpga_type {
-	arria10,
-	u50,
-	u280
-};
-
 /*
  * Struct which contains a message from main thread to worker threads
  * There are 2 types of messages. A new task to deploy or
@@ -172,9 +165,16 @@ static char *strdup(const char *s)
 /*
  * Create and initialize an entry for a new task
  */
-static struct task *create_new_task(char **path, uint8_t num, char **type, uint8_t priority, char *args)
+static struct task *create_new_task(char *paths, uint8_t num_bitstreams, char *frequencies, uint8_t priority, char *args)
 {
 	struct task *new_task;
+
+	uint32_t frequency;
+	uint32_t *frequency_values;
+	int i;
+	char *save_ptr;
+	char *entity; // Either a path or a frequency. Reused.
+	char **entity_in_container; // Pointing to a path string.
 
 	new_task = malloc(sizeof(struct task));
 	if (!new_task) {
@@ -182,34 +182,41 @@ static struct task *create_new_task(char **path, uint8_t num, char **type, uint8
 		return NULL;
 	}
 
-	new_task->num = num;
+	new_task->num_bitstreams = num_bitstreams;
 
-	new_task->bin_path = (char **)malloc(sizeof(char*)*num);
-	new_task->type = (char **)malloc(sizeof(char*)*num);
-
-	for(int i=0; i<num; i++) {
-		new_task->bin_path[i] = strdup(path[i]);
-		if (!new_task->bin_path[i]) {
-			free(new_task);
-			return NULL;
-		}
-
-		new_task->type[i] = strdup(type[i]);
-		if (!new_task->type[i]) {
-			free(new_task);
-			return NULL;
-		}
-	}
-
-	/*
-	new_task->bin_path = strdup(path);
+	// Allocate an array for the paths.
+	new_task->bin_path = malloc(num_bitstreams * sizeof(char *));
 	if (!new_task->bin_path) {
 		free(new_task);
 		return NULL;
-	}*/
+	}
+
+	// Extract the paths.
+	for (entity_in_container=new_task->bin_path,
+		 entity=strtok_r(paths, COMMA_SEP_STR, &save_ptr);
+		 entity != NULL;
+		 entity = strtok_r(NULL, COMMA_SEP_STR, &save_ptr), entity_in_container++) {
+			*entity_in_container = strdup(entity);
+			if (!*(entity_in_container)) {
+				free(new_task);
+				return NULL;
+			}
+	}
+
+	// Allocate an array for the frequencies.
+	frequency_values = malloc(num_bitstreams * sizeof(int));
+
+	// Extract the frequencies.
+	for (i=0, entity=strtok_r(frequencies, COMMA_SEP_STR, &save_ptr);
+		 entity != NULL;
+		 entity = strtok_r(NULL, COMMA_SEP_STR, &save_ptr), i++) {
+			frequency = strtoul(entity, NULL, 0);
+			frequency_values[i] = frequency;
+	}
+	new_task->frequencies = frequency_values;
 
 	new_task->priority = priority;
-	new_task->node = NULL;;
+	new_task->node = NULL;
 	new_task->state = ready;
 	new_task->next = NULL;
 	new_task->prev = NULL;
@@ -228,6 +235,41 @@ static struct task *create_new_task(char **path, uint8_t num, char **type, uint8
 #endif
 
 	return new_task;
+}
+
+void free_task(struct task *task_to_free)
+{
+	uint8_t i=0;
+
+	for (i = task_to_free->num_bitstreams - 1; i > 0; --i)
+	{
+		free(task_to_free->bin_path[i]);
+	}
+	free(task_to_free->bin_path);
+	free(task_to_free->frequencies);
+	if (task_to_free->bin_args != NULL)
+	{
+		free(task_to_free->bin_args);
+	}
+	free(task_to_free);
+}
+
+void print_task(struct task *task_to_print)
+{
+	uint8_t i;
+
+	printf("Task id %d with state %d, priority %hhu, args %s, ", task_to_print->id, task_to_print->state, task_to_print->priority, task_to_print->bin_args ? task_to_print->bin_args : "");
+	printf("frequencies ");
+	for (i=0; i<task_to_print->num_bitstreams; i++)
+	{
+		printf("%d ", task_to_print->frequencies[i]);
+	}
+	printf(" and binaries at: ");
+	for (i=0; i<task_to_print->num_bitstreams; i++)
+	{
+		printf("%s ", task_to_print->bin_path[i]);
+	}
+	printf("\n");
 }
 
 /*
@@ -267,58 +309,20 @@ static void *get_cmd_front(void *arg)
 	 * New task should start with '/' since full path is required.
 	 */
 	if (front_cmd[0] == 'N') {
+		uint8_t num_bitstreams = 0;
 		uint8_t prior = 2;
-		int bit_num = 0;
-		//char path_bin[BIN_PATH_LEN] = {0};
+		char path_bin[BIN_PATH_LEN] = {0};
+		char frequencies[FREQ_LEN] = {0}; // TODO: Use this.
 		char args[ARGS_LEN] = {0};
 
-		char* front_cmd_split;
-		front_cmd_split = strtok(front_cmd, "|");
-		sscanf(front_cmd_split, "N = %d", &bit_num);
-
-		char path_bin_arr[bit_num][BIN_PATH_LEN];
-		char types[bit_num][FPGA_TYPE_LEN];
-
-	
-		//struct task *tsk_to_add[bit_num];
-
-		for(int i=0; i<bit_num; i++) {
-			//uint8_t prior = 2;
-			char path_bin[BIN_PATH_LEN] = {0};
-			char type[FPGA_TYPE_LEN] = {0};
-			//char args[ARGS_LEN] = {0};
-
-			front_cmd_split = strtok(NULL, "|");
-			rc = sscanf(front_cmd_split, " New: %s type: %s priority: %hhu args: %[^\t\n]",
-				path_bin, type, &prior, args);
-
-			if (rc < 3) {
-				err_print("Invalid command\n");
-				goto exit_front;
-			}
-
-			//path_bin_arr[i] = strdup(path_bin);
-			strcpy(path_bin_arr[i], path_bin);
-			strcpy(types[i], type);
-			//types[i] = strdup(type);
-			/*
-			tsk_to_add[i] = create_new_task(path_bin, type, prior, args);
-			if (!tsk_to_add[i]) {
-				err_print("Could not create new task\n");
-				goto exit_front;
-			}*/
-		}
-		
-
-		/*
-		rc = sscanf(front_cmd, "New: %s priority: %hhu args: %[^\t\n]",
-				path_bin, &prior, args);
+		rc = sscanf(front_cmd, "New: %s num_bitstreams: %hhu frequencies: %s priority: %hhu args: %[^\t\n]",
+				path_bin, &num_bitstreams, frequencies, &prior, args);
 		if (rc < 2) {
 			err_print("Invalid command\n");
 			goto exit_front;
-		}*/
+		}
 
-		tsk_to_add = create_new_task((char**)path_bin_arr, bit_num, (char**)types, prior, args);
+		tsk_to_add = create_new_task(path_bin, num_bitstreams, frequencies, prior, args);
 		if (!tsk_to_add) {
 			err_print("Could not create new task\n");
 			goto exit_front;
@@ -330,7 +334,8 @@ static void *get_cmd_front(void *arg)
 		nmsg = malloc(sizeof(struct notify_msg));
 		if (!nmsg) {
 			err_print("Out of memory for notify msg\n");
-			free(tsk_to_add);
+			// free(tsk_to_add);
+			free_task(tsk_to_add);
 			goto exit_front;
 		}
 		nmsg->type = task_new;
@@ -609,15 +614,8 @@ static int handle_node_comm(int epollfd, int con, int sched_efd, int snd_efd,
 			clock_gettime(CLOCK_MONOTONIC, &start);
 #endif
 			if (msg_node->type == deploy || msg_node->type == evict) {
-				if (msg_node->type == deploy) {
-					for (int j=0; j<msg_node->tsk->num; j++) {
-						char user_id[32];
-						sprintf(user_id, "%d-%s", &user_num, msg_node->tsk->type[j]);
-						redisReply *resp = (redisReply *) redisCommand(connection, "SET %s %s", user_id, msg_node->tsk->bin_path[j]);
-					}
-				}
-				rc = send_file(con, msg_node->tsk->bin_path[0],
-						msg_node->type, msg_node->tsk->id); //todo
+				// rc = send_file(con, msg_node->tsk->bin_path,
+				// 		msg_node->type, msg_node->tsk->id);
 #ifdef TIME_NCOM
 				clock_gettime(CLOCK_MONOTONIC, &end);
 				printf("Sending command and binary took %ld ms\n",
@@ -646,7 +644,7 @@ static int handle_node_comm(int epollfd, int con, int sched_efd, int snd_efd,
 				return -1;
 			}
 			if (msg_node->type == deploy || msg_node->type == evict)
-				rc = send_bin_args(con, msg_node->tsk->bin_args); //todo
+				rc = send_bin_args(con, msg_node->tsk->bin_args);
 			free(msg_node);
 			if (rc < 0)
 				return -1;
@@ -1016,7 +1014,8 @@ static void scheduler_algorithm(struct node *nhead, struct task *thead,
 	tsk_tmp = thead;
 	while(tsk_tmp) {
 #if !defined(TIME_NCOM) && !defined(TIME_ALGO) && !defined (TIME_TASK)
-		printf("Task id %d with state %d, priority %hhu and bin at %s and args %s\n", tsk_tmp->id,tsk_tmp->state, tsk_tmp->priority, tsk_tmp->bin_path, tsk_tmp->bin_args ? tsk_tmp->bin_args : "");
+		// printf("Task id %d with state %d, priority %hhu and bin at %s and args %s\n", tsk_tmp->id,tsk_tmp->state, tsk_tmp->priority, "", tsk_tmp->bin_args ? tsk_tmp->bin_args : "");
+		print_task(tsk_tmp);
 #endif
 		if (tsk_tmp->state == stopped) {
 			tsk_avail = tsk_tmp;
@@ -1073,19 +1072,6 @@ int main()
 	int rc = 0, epoll_ret, epollfd, front_sock, nodes_sock;
 	struct sockaddr_un saddr_un = {0};
 	struct sockaddr_in saddr_in = {0};
-
-
-	// setup redis start
-	connection = redisConnect("127.0.0.1", 6379);
-	if((NULL != connection) && connection->err){
-		printf("error : %s\n" , connection->errstr );
-		redisFree(connection);
-		exit(-1);
-	} else if(NULL == connection){
-		exit(-1);
-	}
-	// setup redis finish
-
 
 	epollfd = epoll_create1(0);
 	if (epollfd == -1) {
@@ -1229,9 +1215,10 @@ int main()
 #else
 				printf("\n");
 #endif
-				free(task_tmp->bin_path);
-				free(task_tmp->bin_args);
-				free(task_tmp);
+				free_task(task_tmp);
+				// free(task_tmp->bin_path); // TODO: Change this for multiple bitstreams.
+				// free(task_tmp->bin_args); // TODO: Change this for multiple bitstreams.
+				// free(task_tmp);
 				break;
 			}
 			case migration:
@@ -1320,7 +1307,7 @@ int main()
 		}
 		node_avail->task = tsk_avail;
 	}
-	redisFree(connection);
+
 	return 0;
 
 fail_socs:
