@@ -2,7 +2,7 @@
 all: primary daemon rest
 
 SCHED_CFLAGS  += -I/usr/local/include/hiredis
-SCHED_LDFLAGS := -lpthread -lhiredis
+SCHED_LDFLAGS := -pthread -lhiredis
 
 primary: primary.o common.o
 	$(CC) $(SCHED_LDFLAGS) $^ -o $@
