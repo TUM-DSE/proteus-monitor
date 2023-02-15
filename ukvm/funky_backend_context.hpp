@@ -70,12 +70,40 @@ namespace funky_backend {
       bool sync_flag;
       bool updated_flag;
 
+      // to distinguish a fpga vendor
+      bool fpga_vendor; // 0: intel 1: xilinx
+
     public:
       ClContext(void* wr_queue_addr, void* rd_queue_addr) 
         : request_q(wr_queue_addr), 
           response_q(rd_queue_addr), 
           bin_guest_addr(0), bin_size(0), 
-          mig_save_data(0), sync_flag(true), updated_flag(false) {}
+          mig_save_data(0), sync_flag(true), updated_flag(false), fpga_vendor(0)
+      {
+        cl_int err;
+    
+        // TODO: assign as many devices to the guest as requested  
+        //       Currently, only one device (devices[0]) is assigned to the guest.
+        auto devices = xcl::get_intel_devices();
+        if(devices.size() == 0) {
+          devices = xcl::get_xil_devices();
+          if(devices.size() == 0) {
+            std::cout << "Error: device is not found.\n";
+            exit(EXIT_FAILURE);
+          }
+          fpga_vendor = 1; // Xilinx
+        }
+
+        // auto device = devices[0];
+        device = devices[0];
+
+        // TODO: command queue option depends on the guest, so it shouldn't be created in advance?
+        // Creating Context and Command Queue for selected Device
+        OCL_CHECK(err, context = cl::Context(device, NULL, NULL, NULL, &err));
+        // OCL_CHECK(err, queue = cl::CommandQueue(context, device, CL_QUEUE_PROFILING_ENABLE, &err));
+        OCL_CHECK(err,  queues.emplace(0, cl::CommandQueue(context, device, CL_QUEUE_PROFILING_ENABLE, &err)));
+        // OCL_CHECK(err,  queues.emplace(0, cl::CommandQueue(context, device, CL_QUEUE_PROFILING_ENABLE | CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE, &err)));
+      }
 
       ~ClContext()
       {}
@@ -111,7 +139,21 @@ namespace funky_backend {
       /** 
        * reconfigure FPGA with a bitstream 
        */
-      virtual int reconfigure_fpga(void* bin, size_t bin_size) = 0;
+      //virtual int reconfigure_fpga(void* bin, size_t bin_size) = 0;
+      int reconfigure_fpga(void* bin, size_t bin_size) {
+        cl_int err = CL_SUCCESS;
+
+        cl::Program::Binaries bins{{bin, bin_size}};
+
+        auto devices = xcl::get_intel_devices();
+        std::vector <cl::Device> p_devices = {devices[0]};
+
+        /* program bistream to the device (FPGA) */
+        program = std::make_unique<cl::Program>(context, p_devices, bins, nullptr, &err);
+        if (!fpga_vendor) program.get()->build(); //clBuildProgram only when using an Intel FPGA
+
+        return err;
+      }
 
       /**
        * create buffer in global memory 
@@ -677,95 +719,6 @@ namespace funky_backend {
         return true;
       }
   }; // ClContext
-
-  class XoclContext : public ClContext {
-    public:
-      XoclContext(void* wr_queue_addr, void* rd_queue_addr) : ClContext(wr_queue_addr, rd_queue_addr) {
-        cl_int err;
-        
-        // TODO: assign as many devices to the guest as requested  
-        //       Currently, only one device (devices[0]) is assigned to the guest.
-        auto devices = xcl::get_xil_devices();
-        if(devices.size() == 0) {
-          std::cout << "Error: no xilinx device is found.\n";
-          exit(EXIT_FAILURE);
-        }
-
-        // auto device = devices[0];
-        device = devices[0];
-
-        // TODO: command queue option depends on the guest, so it shouldn't be created in advance?
-        // Creating Context and Command Queue for selected Device
-        OCL_CHECK(err, context = cl::Context(device, NULL, NULL, NULL, &err));
-        // OCL_CHECK(err, queue = cl::CommandQueue(context, device, CL_QUEUE_PROFILING_ENABLE, &err));
-        OCL_CHECK(err,  queues.emplace(0, cl::CommandQueue(context, device, CL_QUEUE_PROFILING_ENABLE, &err)));
-        // OCL_CHECK(err,  queues.emplace(0, cl::CommandQueue(context, device, CL_QUEUE_PROFILING_ENABLE | CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE, &err)));
-      }
-
-      ~XoclContext()
-      {}
-
-      virtual int reconfigure_fpga(void* bin, size_t bin_size) {
-        cl_int err = CL_SUCCESS;
-
-        cl::Program::Binaries bins{{bin, bin_size}};
-
-        auto devices = xcl::get_xil_devices();
-        std::vector <cl::Device> p_devices = {devices[0]};
-
-        /* program bistream to the device (FPGA) */
-        program = std::make_unique<cl::Program>(context, p_devices, bins, nullptr, &err);
-        //program.get()->build();
-
-        return err;
-      }
-
-  }; // XoclContext
-
-  class AoclContext : public ClContext {
-    public:
-      AoclContext(void* wr_queue_addr, void* rd_queue_addr) : ClContext(wr_queue_addr, rd_queue_addr){
-        cl_int err;
-        
-        // TODO: assign as many devices to the guest as requested  
-        //       Currently, only one device (devices[0]) is assigned to the guest.
-        auto devices = xcl::get_intel_devices();
-        if(devices.size() == 0) {
-          std::cout << "Error: no intel device is found.\n";
-          exit(EXIT_FAILURE);
-        }
-
-        // auto device = devices[0];
-        device = devices[0];
-
-        // TODO: command queue option depends on the guest, so it shouldn't be created in advance?
-        // Creating Context and Command Queue for selected Device
-        OCL_CHECK(err, context = cl::Context(device, NULL, NULL, NULL, &err));
-        // OCL_CHECK(err, queue = cl::CommandQueue(context, device, CL_QUEUE_PROFILING_ENABLE, &err));
-        OCL_CHECK(err,  queues.emplace(0, cl::CommandQueue(context, device, CL_QUEUE_PROFILING_ENABLE, &err)));
-        // OCL_CHECK(err,  queues.emplace(0, cl::CommandQueue(context, device, CL_QUEUE_PROFILING_ENABLE | CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE, &err)));
-      }
-
-      ~AoclContext()
-      {}
-
-      virtual int reconfigure_fpga(void* bin, size_t bin_size) {
-        cl_int err = CL_SUCCESS;
-
-        cl::Program::Binaries bins{{bin, bin_size}};
-
-        auto devices = xcl::get_intel_devices();
-        std::vector <cl::Device> p_devices = {devices[0]};
-
-        /* program bistream to the device (FPGA) */
-        program = std::make_unique<cl::Program>(context, p_devices, bins, nullptr, &err);
-        program.get()->build(); //clBuildProgram
-
-        return err;
-      }
-
-  }; // AoclContext
-
 } // funky_backend
 
 #endif  // __FUNKY_BACKEND_CONTEXT__

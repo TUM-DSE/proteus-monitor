@@ -32,7 +32,7 @@
 #include <mutex>
 
 /* Xocl backend context class to save temp data & communicate with xocl lib */
-std::unique_ptr<funky_backend::AoclContext> bk_context;
+std::unique_ptr<funky_backend::ClContext> bk_context;
 
 int allocate_fpga(void* wr_queue_addr, void* rd_queue_addr) {
   if(bk_context != nullptr) {
@@ -40,7 +40,7 @@ int allocate_fpga(void* wr_queue_addr, void* rd_queue_addr) {
     return -1;
   }
 
-  bk_context = std::make_unique<funky_backend::AoclContext>(wr_queue_addr, rd_queue_addr);
+  bk_context = std::make_unique<funky_backend::ClContext>(wr_queue_addr, rd_queue_addr);
   return 0;
 }
 

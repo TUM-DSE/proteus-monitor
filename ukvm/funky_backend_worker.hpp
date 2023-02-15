@@ -371,7 +371,7 @@ namespace funky_backend {
 
     private:
       struct fpga_thr_info m_thr_info;
-      funky_backend::AoclContext m_fpga_context;
+      funky_backend::ClContext m_fpga_context;
       std::vector<uint8_t> m_save_data;
       buffer::Reader<struct thr_msg> msg_read_queue;
       buffer::Writer<struct thr_msg> msg_write_queue;
