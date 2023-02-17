@@ -274,6 +274,11 @@ void save_bitstreams(struct task *tsk) {
 		char key_id[32];
 		sprintf(key_id, "%d-%d", tsk->id, type);
 		resp = (redisReply*) redisCommand(connection, "SET %s %s", key_id, tsk->bitstreams[i]);
+		if (resp == NULL) {
+			err_print("failed to save a bitstream");
+			redisFree(connection);
+			exit(-1);
+		}
 	}
 }
 
@@ -1097,10 +1102,11 @@ int main()
 	// setup redis start
 	connection = redisConnect("127.0.0.1", 6379);
 	if((NULL != connection) && connection->err){
-		printf("error : %s\n" , connection->errstr);
+		err_print("redis connection error : %s\n" , connection->errstr);
 		redisFree(connection);
 		exit(-1);
 	} else if(NULL == connection){
+		err_print("redis error\n");
 		exit(-1);
 	}
 	// setup redis finish
