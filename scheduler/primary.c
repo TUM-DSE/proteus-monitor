@@ -23,6 +23,8 @@
 
 #define COMMA_SEP_STR ","
 
+redisContext *connection = NULL;
+
 //#define TIME_NCOM 1
 //#define TIME_TASK 1
 //#define TIME_ALGO 1
@@ -61,8 +63,9 @@ enum msg_type {
 
 struct task {
 	uint32_t id;
-	char **bin_path; // == *bin_path[]
+	char *bin_path; 
 	char *bin_args; // Assumption: All bitstreams will have same args. 
+	char **bitstreams;
 	uint8_t priority;
 	enum task_state state;
 	struct node *node;	// the node where the task has been deployed
@@ -128,6 +131,12 @@ struct notify_msg {
 	};
 };
 
+enum fpga_type {
+	arria10,
+	u50,
+	u280
+};
+
 /*
  * Struct which contains a message from main thread to worker threads
  * There are 2 types of messages. A new task to deploy or
@@ -165,7 +174,7 @@ static char *strdup(const char *s)
 /*
  * Create and initialize an entry for a new task
  */
-static struct task *create_new_task(char *paths, uint8_t num_bitstreams, char *frequencies, uint8_t priority, char *args)
+static struct task *create_new_task(char *path, uint8_t num_bitstreams, char *frequencies, uint8_t priority, char *args, char** bitstreams)
 {
 	struct task *new_task;
 
@@ -185,12 +194,19 @@ static struct task *create_new_task(char *paths, uint8_t num_bitstreams, char *f
 	new_task->num_bitstreams = num_bitstreams;
 
 	// Allocate an array for the paths.
-	new_task->bin_path = malloc(num_bitstreams * sizeof(char *));
+	new_task->bin_path = strdup(path);
+	//new_task->bin_path = malloc(num_bitstreams * sizeof(char *));
 	if (!new_task->bin_path) {
 		free(new_task);
 		return NULL;
 	}
 
+	new_task->bitstreams = malloc(num_bitstreams * sizeof(char*));
+	for (uint8_t count = 0; count < num_bitstreams; count++) {
+		new_task->bitstreams[count] = strdup(bitstreams[count]);
+	}
+
+	/*
 	// Extract the paths.
 	for (entity_in_container=new_task->bin_path,
 		 entity=strtok_r(paths, COMMA_SEP_STR, &save_ptr);
@@ -202,6 +218,7 @@ static struct task *create_new_task(char *paths, uint8_t num_bitstreams, char *f
 				return NULL;
 			}
 	}
+	*/
 
 	// Allocate an array for the frequencies.
 	frequency_values = malloc(num_bitstreams * sizeof(int));
@@ -239,12 +256,15 @@ static struct task *create_new_task(char *paths, uint8_t num_bitstreams, char *f
 
 void free_task(struct task *task_to_free)
 {
-	uint8_t i=0;
-
+	//uint8_t i=0;
+	/*
 	for (i = task_to_free->num_bitstreams - 1; i > 0; --i)
 	{
 		free(task_to_free->bin_path[i]);
-	}
+	}*/
+
+	for (uint8_t i=0; i<task_to_free->num_bitstreams; i++) free(task_to_free->bitstreams[i]);
+	
 	free(task_to_free->bin_path);
 	free(task_to_free->frequencies);
 	if (task_to_free->bin_args != NULL)
@@ -256,20 +276,37 @@ void free_task(struct task *task_to_free)
 
 void print_task(struct task *task_to_print)
 {
-	uint8_t i;
-
-	printf("Task id %d with state %d, priority %hhu, args %s, ", task_to_print->id, task_to_print->state, task_to_print->priority, task_to_print->bin_args ? task_to_print->bin_args : "");
+	printf("Task id %d with state %d, path %s, priority %hhu, args %s, ", task_to_print->id, task_to_print->state, task_to_print->bin_path, task_to_print->priority, task_to_print->bin_args ? task_to_print->bin_args : "");
 	printf("frequencies ");
-	for (i=0; i<task_to_print->num_bitstreams; i++)
-	{
-		printf("%d ", task_to_print->frequencies[i]);
-	}
+	for (uint8_t i=0; i<task_to_print->num_bitstreams; i++) printf("%d ", task_to_print->frequencies[i]);
+	/*
 	printf(" and binaries at: ");
 	for (i=0; i<task_to_print->num_bitstreams; i++)
 	{
 		printf("%s ", task_to_print->bin_path[i]);
 	}
+	*/
+
+	printf("bitstreams ");
+	for (uint8_t i=0; i<task_to_print->num_bitstreams; i++) printf("%s ", task_to_print->bitstreams[i]);
 	printf("\n");
+}
+
+enum fpga_type return_fpga_type(char* bin) { //ToDo
+	enum fpga_type ret;
+	return ret;
+}
+
+void save_bitstreams(struct task *tsk) {
+	redisReply* resp;
+	for (uint8_t i=0; i<tsk->num_bitstreams; i++) {
+		enum fpga_type type = return_fpga_type(tsk->bitstreams[i]);
+		char key_id[32];
+		sprintf(key_id, "%d-%d", tsk->id, type);
+		resp = (redisReply*) redisCommand(connection, "SET %s %s", key_id, tsk->bitstreams[i]);
+	}
+	printf("finish");
+	exit(1);
 }
 
 /*
@@ -308,6 +345,7 @@ static void *get_cmd_front(void *arg)
 	 * Determine if it is a command or a path to a new binary
 	 * New task should start with '/' since full path is required.
 	 */
+	// New command should be like "New: binary num_bitstreams: 2 priority: 0 args: these are arguments | bitstream1.xclbin | bitstream2.aocx"
 	if (front_cmd[0] == 'N') {
 		uint8_t num_bitstreams = 0;
 		uint8_t prior = 2;
@@ -315,14 +353,29 @@ static void *get_cmd_front(void *arg)
 		char frequencies[FREQ_LEN] = {0}; // TODO: Use this.
 		char args[ARGS_LEN] = {0};
 
-		rc = sscanf(front_cmd, "New: %s num_bitstreams: %hhu frequencies: %s priority: %hhu args: %[^\t\n]",
-				path_bin, &num_bitstreams, frequencies, &prior, args);
+		char* front_cmd_split = strtok(front_cmd, "|");
+
+		rc = sscanf(front_cmd_split, "New: %s num_bitstreams: %hhu priority: %hhu args: %[^\t\n]",
+				path_bin, &num_bitstreams, &prior, args);
 		if (rc < 2) {
 			err_print("Invalid command\n");
 			goto exit_front;
 		}
 
-		tsk_to_add = create_new_task(path_bin, num_bitstreams, frequencies, prior, args);
+		char **path_bin_arr = malloc(num_bitstreams * sizeof(char*));
+
+		for (uint8_t i=0; i<num_bitstreams; i++) {
+			char path_bs[BIN_PATH_LEN] = {0};
+			front_cmd_split = strtok(NULL, "|");
+			rc = sscanf(front_cmd_split, " %s", path_bs);
+			if (rc < 1) {
+				err_print("Invalid command\n");
+				goto exit_front;
+			}
+			path_bin_arr[i] = strdup(path_bs);
+		}
+
+		tsk_to_add = create_new_task(path_bin, num_bitstreams, frequencies, prior, args, path_bin_arr);
 		if (!tsk_to_add) {
 			err_print("Could not create new task\n");
 			goto exit_front;
@@ -1073,6 +1126,17 @@ int main()
 	struct sockaddr_un saddr_un = {0};
 	struct sockaddr_in saddr_in = {0};
 
+	// setup redis start
+	connection = redisConnect("127.0.0.1", 6379);
+	if((NULL != connection) && connection->err){
+		printf("error : %s\n" , connection->errstr);
+		redisFree(connection);
+		exit(-1);
+	} else if(NULL == connection){
+		exit(-1);
+	}
+	// setup redis finish
+
 	epollfd = epoll_create1(0);
 	if (epollfd == -1) {
 		perror("epoll_create1");
@@ -1159,7 +1223,7 @@ int main()
 				break;
 			case task_new:
 				new_msg->tsk->id = nr_tsks++;
-
+				save_bitstreams(new_msg->tsk); // save bitstreams to BitstreamDB
 				if (new_msg->tsk->priority == 0)
 					insert_task(&htsk_head, &htsk_last,
 							new_msg->tsk);
@@ -1307,7 +1371,7 @@ int main()
 		}
 		node_avail->task = tsk_avail;
 	}
-
+	redisFree(connection);
 	return 0;
 
 fail_socs:
