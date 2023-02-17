@@ -195,7 +195,6 @@ static struct task *create_new_task(char *path, uint8_t num_bitstreams, char *fr
 
 	// Allocate an array for the paths.
 	new_task->bin_path = strdup(path);
-	//new_task->bin_path = malloc(num_bitstreams * sizeof(char *));
 	if (!new_task->bin_path) {
 		free(new_task);
 		return NULL;
@@ -205,20 +204,6 @@ static struct task *create_new_task(char *path, uint8_t num_bitstreams, char *fr
 	for (uint8_t count = 0; count < num_bitstreams; count++) {
 		new_task->bitstreams[count] = strdup(bitstreams[count]);
 	}
-
-	/*
-	// Extract the paths.
-	for (entity_in_container=new_task->bin_path,
-		 entity=strtok_r(paths, COMMA_SEP_STR, &save_ptr);
-		 entity != NULL;
-		 entity = strtok_r(NULL, COMMA_SEP_STR, &save_ptr), entity_in_container++) {
-			*entity_in_container = strdup(entity);
-			if (!*(entity_in_container)) {
-				free(new_task);
-				return NULL;
-			}
-	}
-	*/
 
 	// Allocate an array for the frequencies.
 	frequency_values = malloc(num_bitstreams * sizeof(int));
@@ -256,13 +241,6 @@ static struct task *create_new_task(char *path, uint8_t num_bitstreams, char *fr
 
 void free_task(struct task *task_to_free)
 {
-	//uint8_t i=0;
-	/*
-	for (i = task_to_free->num_bitstreams - 1; i > 0; --i)
-	{
-		free(task_to_free->bin_path[i]);
-	}*/
-
 	for (uint8_t i=0; i<task_to_free->num_bitstreams; i++) free(task_to_free->bitstreams[i]);
 	
 	free(task_to_free->bin_path);
@@ -276,23 +254,15 @@ void free_task(struct task *task_to_free)
 
 void print_task(struct task *task_to_print)
 {
-	printf("Task id %d with state %d, path %s, priority %hhu, args %s, ", task_to_print->id, task_to_print->state, task_to_print->bin_path, task_to_print->priority, task_to_print->bin_args ? task_to_print->bin_args : "");
-	printf("frequencies ");
+	printf("Task id %d with state %d, binary_path: %s, num_bitstreams: %d, priority: %hhu, args: %s, ", task_to_print->id, task_to_print->state, task_to_print->bin_path, task_to_print->num_bitstreams, task_to_print->priority, task_to_print->bin_args ? task_to_print->bin_args : "");
+	printf("frequencies: ");
 	for (uint8_t i=0; i<task_to_print->num_bitstreams; i++) printf("%d ", task_to_print->frequencies[i]);
-	/*
-	printf(" and binaries at: ");
-	for (i=0; i<task_to_print->num_bitstreams; i++)
-	{
-		printf("%s ", task_to_print->bin_path[i]);
-	}
-	*/
-
-	printf("bitstreams ");
+	printf(", bitstreams: ");
 	for (uint8_t i=0; i<task_to_print->num_bitstreams; i++) printf("%s ", task_to_print->bitstreams[i]);
 	printf("\n");
 }
 
-enum fpga_type return_fpga_type(char* bin) { //ToDo
+enum fpga_type return_fpga_type(char* bin) { //ToDo: read binary and distinguish fpga_type (arria10, u50, etc...)
 	enum fpga_type ret;
 	return ret;
 }
@@ -305,8 +275,6 @@ void save_bitstreams(struct task *tsk) {
 		sprintf(key_id, "%d-%d", tsk->id, type);
 		resp = (redisReply*) redisCommand(connection, "SET %s %s", key_id, tsk->bitstreams[i]);
 	}
-	printf("finish");
-	exit(1);
 }
 
 /*
