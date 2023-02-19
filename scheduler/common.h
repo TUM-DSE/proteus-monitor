@@ -50,7 +50,13 @@ struct com_nod {
 	};
 };
 
+struct size_data {
+	uint32_t uk_size;
+	uint32_t bs_size;
+};
+
 int setup_socket(int epollfd, struct sockaddr *saddr, uint8_t tobind);
+ssize_t send_merged_binary(int socket, const char *binary, const char *bs, enum mnode_type msg_type, uint32_t id);
 ssize_t send_file(int socket, const char *filename, enum mnode_type msg_type, uint32_t id);
 
 #endif /* SCHED_COMMON_H */

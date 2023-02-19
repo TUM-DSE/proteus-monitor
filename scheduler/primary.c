@@ -66,6 +66,7 @@ struct task {
 	char *bin_path; 
 	char *bin_args; // Assumption: All bitstreams will have same args. 
 	char **bitstreams;
+	char *bitstream; // save path of a bitstream that will be sent
 	uint8_t priority;
 	enum task_state state;
 	struct node *node;	// the node where the task has been deployed
@@ -639,9 +640,9 @@ static int handle_node_comm(int epollfd, int con, int sched_efd, int snd_efd,
 			struct timespec start, end;
 			clock_gettime(CLOCK_MONOTONIC, &start);
 #endif
-			if (msg_node->type == deploy || msg_node->type == evict) {
-				// rc = send_file(con, msg_node->tsk->bin_path,
-				// 		msg_node->type, msg_node->tsk->id);
+			if (msg_node->type == deploy || msg_node->type == evict) { 
+				rc = send_merged_binary(con, msg_node->tsk->bin_path, msg_node->tsk->bitstream, msg_node->type, msg_node->tsk->id); 
+				//rc = send_file(con, msg_node->tsk->bin_path, msg_node->type, msg_node->tsk->id);
 #ifdef TIME_NCOM
 				clock_gettime(CLOCK_MONOTONIC, &end);
 				printf("Sending command and binary took %ld ms\n",

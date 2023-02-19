@@ -68,6 +68,92 @@ err_set:
 	return -1;
 }
 
+ssize_t send_merged_binary(int socket, const char *binary, const char *bs, enum mnode_type msg_type, uint32_t id) {
+	struct stat st1, st2;
+	struct com_nod node_com = {0};
+
+	// mapping a merged binary
+	int rc = stat(binary, &st1);
+	if (rc < 0) {
+		perror("Getting file size");
+		return -1;
+	}
+	rc = stat(bs, &st2);
+	if (rc < 0) {
+		perror("Getting file size");
+		return -1;
+	}
+	void *new_addr = malloc(st1.st_size + st2.st_size);
+	if (new_addr == NULL) {
+		perror("malloc");
+		return -1;
+	}
+
+	int fd1 = open(binary, O_RDONLY);
+	if (fd1 < 0) {
+		perror("Opening file to send");
+		return -1;
+	}
+	int fd2 = open(bs, O_RDONLY);
+	if (fd2 < 0) {
+		perror("Opening file to send");
+		return -1;
+	}
+	int count1 = read(fd1, new_addr, st1.st_size);
+	int count2 = read(fd2, new_addr+count1, st2.st_size);
+	int merged_size = st1.st_size + st2.st_size;
+    if (count1 + count2 != merged_size) {
+        perror("file read\n");
+        return -1;
+    }
+
+	close(fd1);
+	close(fd2);
+
+
+	// sending com_nod
+	node_com.type = msg_type;
+	node_com.tsk.size = merged_size;
+	node_com.tsk.id = id;
+	rc = write(socket, &node_com, sizeof(struct com_nod));
+	if (rc < sizeof(struct com_nod)) {
+		if (rc < 0)
+			perror("Sending bin");
+		else
+			err_print("Short send of bin\n");
+		return -1;
+	}
+
+	// sending a merged binary
+	int count = 0;
+	while (count < merged_size) {
+		int n = write(socket, new_addr+count, merged_size - count);
+		if (n < 0) {
+			perror("Sending file");
+			return -1;
+		}
+		count += n;
+	}
+
+	if (count != merged_size) {
+		perror("Writing a merged bin\n");
+		return -1;
+	}
+
+	// sending the sizes of a unikernel bin and a bitstream
+	struct size_data sizes = {st1.st_size, st2.st_size};
+	rc = write(socket, &sizes, sizeof(struct size_data));
+	if (rc < sizeof(struct size_data)) {
+		if (rc < 0)
+			perror("Sending size data");
+		else
+			err_print("Short send of size data\n");
+		return -1;
+	}
+
+	return count;
+}
+
 /*
  * Send a file over a socket
  */

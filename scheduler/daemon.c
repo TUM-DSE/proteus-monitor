@@ -339,6 +339,10 @@ static struct ukvm_ps *msg_from_primary(int socket, int *ret)
 		free(buf);
 		if (rc < 0)
 			goto ret_1;
+		struct size_data sizes;
+		rc = read(socket, &sizes, sizeof(struct size_data));
+		if (rc < 0) 
+			goto ret_1;
 		args = rcv_args(socket, &rc);
 		if (rc < 0)
 			goto ret_1;
