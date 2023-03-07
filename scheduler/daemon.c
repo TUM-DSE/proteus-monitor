@@ -339,9 +339,8 @@ static struct ukvm_ps *msg_from_primary(int socket, int *ret)
 		free(buf);
 		if (rc < 0)
 			goto ret_1;
-		struct size_data sizes;
-		rc = read(socket, &sizes, sizeof(struct size_data));
-		if (rc < 0) 
+		buf = read_file_n(socket, node_com.tsk.bs_size);
+		if (!buf) 
 			goto ret_1;
 		args = rcv_args(socket, &rc);
 		if (rc < 0)
@@ -371,6 +370,9 @@ static struct ukvm_ps *msg_from_primary(int socket, int *ret)
 		rc = write_file_n(buf, node_com.tsk.size, ps_ukvm->binary);
 		free(buf);
 		if (rc < 0)
+			goto ret_1;
+		buf = read_file_n(socket, node_com.tsk.bs_size);
+		if (!buf) 
 			goto ret_1;
 		args = rcv_args(socket, &rc);
 		if (rc < 0)

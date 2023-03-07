@@ -33,6 +33,7 @@ struct tsk_res {
 
 struct tsk_dpl {
 	off_t size;
+	off_t bs_size;
 	uint32_t id;
 };
 
@@ -50,13 +51,10 @@ struct com_nod {
 	};
 };
 
-struct size_data {
-	uint32_t uk_size;
-	uint32_t bs_size;
-};
 
 int setup_socket(int epollfd, struct sockaddr *saddr, uint8_t tobind);
 ssize_t send_merged_binary(int socket, const char *binary, const char *bs, enum mnode_type msg_type, uint32_t id);
 ssize_t send_file(int socket, const char *filename, enum mnode_type msg_type, uint32_t id);
+ssize_t write_with_check(int socket, void* addr, off_t size);
 
 #endif /* SCHED_COMMON_H */

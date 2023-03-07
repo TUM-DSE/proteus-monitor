@@ -83,8 +83,14 @@ ssize_t send_merged_binary(int socket, const char *binary, const char *bs, enum 
 		perror("Getting file size");
 		return -1;
 	}
-	void *new_addr = malloc(st1.st_size + st2.st_size);
-	if (new_addr == NULL) {
+	void *new_addr1 = malloc(st1.st_size);
+	if (new_addr1 == NULL) {
+		perror("malloc");
+		return -1;
+	}
+
+	void *new_addr2 = malloc(st2.st_size);
+	if (new_addr2 == NULL) {
 		perror("malloc");
 		return -1;
 	}
@@ -99,13 +105,13 @@ ssize_t send_merged_binary(int socket, const char *binary, const char *bs, enum 
 		perror("Opening file to send");
 		return -1;
 	}
-	int count1 = read(fd1, new_addr, st1.st_size);
-	int count2 = read(fd2, new_addr+count1, st2.st_size);
-	int merged_size = st1.st_size + st2.st_size;
-    if (count1 + count2 != merged_size) {
-        perror("file read\n");
-        return -1;
-    }
+
+	int count1 = read(fd1, new_addr1, st1.st_size);
+	int count2 = read(fd2, new_addr2, st2.st_size);
+	if (count1 != st1.st_size || count2 != st2.st_size) {
+		perror("count");
+		return -1;
+	}
 
 	close(fd1);
 	close(fd2);
@@ -113,7 +119,8 @@ ssize_t send_merged_binary(int socket, const char *binary, const char *bs, enum 
 
 	// sending com_nod
 	node_com.type = msg_type;
-	node_com.tsk.size = merged_size;
+	node_com.tsk.size = st1.st_size;
+	node_com.tsk.bs_size = st2.st_size;
 	node_com.tsk.id = id;
 	rc = write(socket, &node_com, sizeof(struct com_nod));
 	if (rc < sizeof(struct com_nod)) {
@@ -124,33 +131,31 @@ ssize_t send_merged_binary(int socket, const char *binary, const char *bs, enum 
 		return -1;
 	}
 
-	// sending a merged binary
+	// sending a uk binary and a bitstream
+	int res1 = write_with_check(socket, new_addr1, st1.st_size);
+	int res2 = write_with_check(socket, new_addr2, st2.st_size);
+
+	free(new_addr1);
+	free(new_addr2);
+
+	return res1 + res2;
+}
+
+ssize_t write_with_check(int socket, void* addr, off_t size) {
 	int count = 0;
-	while (count < merged_size) {
-		int n = write(socket, new_addr+count, merged_size - count);
+	while (count < size) {
+		int n = write(socket, addr + count, size - count);
 		if (n < 0) {
-			perror("Sending file");
+			perror("Writing file");
 			return -1;
 		}
 		count += n;
 	}
 
-	if (count != merged_size) {
-		perror("Writing a merged bin\n");
+	if (count != size) {
+		perror("Writing file\n");
 		return -1;
 	}
-
-	// sending the sizes of a unikernel bin and a bitstream
-	struct size_data sizes = {st1.st_size, st2.st_size};
-	rc = write(socket, &sizes, sizeof(struct size_data));
-	if (rc < sizeof(struct size_data)) {
-		if (rc < 0)
-			perror("Sending size data");
-		else
-			err_print("Short send of size data\n");
-		return -1;
-	}
-
 	return count;
 }
 
