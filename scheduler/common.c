@@ -10,6 +10,7 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/sendfile.h>
+#include <sys/mman.h>
 
 #include "common.h"
 
@@ -68,50 +69,44 @@ err_set:
 	return -1;
 }
 
-ssize_t send_merged_binary(int socket, const char *binary, const char *bs, enum mnode_type msg_type, uint32_t id) {
+ssize_t send_binaries(int socket, const char *binary, const char *bs, enum mnode_type msg_type, uint32_t id) {
 	struct stat st1, st2;
 	struct com_nod node_com = {0};
 
-	// mapping a merged binary
-	int rc = stat(binary, &st1);
-	if (rc < 0) {
-		perror("Getting file size");
-		return -1;
-	}
-	rc = stat(bs, &st2);
-	if (rc < 0) {
-		perror("Getting file size");
-		return -1;
-	}
-	void *new_addr1 = malloc(st1.st_size);
-	if (new_addr1 == NULL) {
-		perror("malloc");
-		return -1;
-	}
-
-	void *new_addr2 = malloc(st2.st_size);
-	if (new_addr2 == NULL) {
-		perror("malloc");
-		return -1;
-	}
-
+	// mapping binaries
 	int fd1 = open(binary, O_RDONLY);
 	if (fd1 < 0) {
-		perror("Opening file to send");
+		perror("Opening binary file to send");
 		return -1;
 	}
 	int fd2 = open(bs, O_RDONLY);
 	if (fd2 < 0) {
-		perror("Opening file to send");
+		perror("Opening bs file to send");
 		return -1;
 	}
 
-	int count1 = read(fd1, new_addr1, st1.st_size);
-	int count2 = read(fd2, new_addr2, st2.st_size);
-	if (count1 != st1.st_size || count2 != st2.st_size) {
-		perror("count");
+	int rc = fstat(fd1, &st1);
+	if (rc < 0) {
+		perror("Getting binary file size");
 		return -1;
 	}
+	rc = fstat(fd2, &st2);
+	if (rc < 0) {
+		perror("Getting bs file size");
+		return -1;
+	}
+
+	void *new_addr1 = mmap(NULL, st1.st_size, PROT_READ, MAP_PRIVATE, fd1, 0);
+	if (new_addr1 == MAP_FAILED) {
+        perror("mmap failed\n");
+        return -1;
+    }
+
+	void *new_addr2 = mmap(NULL, st2.st_size, PROT_READ, MAP_PRIVATE, fd2, 0);
+	if (new_addr2 == MAP_FAILED) {
+        perror("mmap failed\n");
+        return -1;
+    }
 
 	close(fd1);
 	close(fd2);
@@ -135,8 +130,16 @@ ssize_t send_merged_binary(int socket, const char *binary, const char *bs, enum 
 	int res1 = write_with_check(socket, new_addr1, st1.st_size);
 	int res2 = write_with_check(socket, new_addr2, st2.st_size);
 
-	free(new_addr1);
-	free(new_addr2);
+	rc = munmap(new_addr1, st1.st_size);
+	if (rc < 0) {
+		perror("munmap");
+		return -1;
+	}
+	rc = munmap(new_addr2, st2.st_size);
+	if (rc < 0) {
+		perror("munmap");
+		return -1;
+	}
 
 	return res1 + res2;
 }
@@ -153,7 +156,7 @@ ssize_t write_with_check(int socket, void* addr, off_t size) {
 	}
 
 	if (count != size) {
-		perror("Writing file\n");
+		perror("Writing file, not match size\n");
 		return -1;
 	}
 	return count;

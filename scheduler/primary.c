@@ -641,7 +641,7 @@ static int handle_node_comm(int epollfd, int con, int sched_efd, int snd_efd,
 			clock_gettime(CLOCK_MONOTONIC, &start);
 #endif
 			if (msg_node->type == deploy || msg_node->type == evict) { 
-				rc = send_merged_binary(con, msg_node->tsk->bin_path, msg_node->tsk->bitstream, msg_node->type, msg_node->tsk->id); 
+				rc = send_binaries(con, msg_node->tsk->bin_path, msg_node->tsk->bitstream, msg_node->type, msg_node->tsk->id); // "/home/shu/examples_aoc/hello_world/bin/hello_world.aocx"
 				//rc = send_file(con, msg_node->tsk->bin_path, msg_node->type, msg_node->tsk->id);
 #ifdef TIME_NCOM
 				clock_gettime(CLOCK_MONOTONIC, &end);

@@ -266,7 +266,8 @@ namespace funky_backend {
       /* Reconfigure FPGA */
       void reconfigure_fpga()
       {
-        void* bitstream = UKVM_CHECKED_GPA_P(m_thr_info.hv, m_thr_info.bs, m_thr_info.bs_len);
+        //void* bitstream = UKVM_CHECKED_GPA_P(m_thr_info.hv, m_thr_info.bs, m_thr_info.bs_len);
+        void* bitstream = (void*) m_thr_info.bs;
 
         auto ret = m_fpga_context.reconfigure_fpga(bitstream, m_thr_info.bs_len);
         if(ret != CL_SUCCESS)

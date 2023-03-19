@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <vector>
 #include <map>
+#include <sys/mman.h>
 
 // TODO: user funky_hw_context to save/restore data on FPGA
 // #include "funky_hw_context.hpp"
@@ -151,6 +152,12 @@ namespace funky_backend {
         /* program bistream to the device (FPGA) */
         program = std::make_unique<cl::Program>(context, p_devices, bins, nullptr, &err);
         if (!fpga_vendor) program.get()->build(); //clBuildProgram only when using an Intel FPGA
+
+        int res = munmap(bin, bin_size); // mmap: hypercall_fpgainit in ukvm_module_fpga.c
+        if (res < 0) {
+          perror("munmap for bitstream");
+          exit(EXIT_FAILURE);
+        }
 
         return err;
       }

@@ -35,6 +35,7 @@ struct ukvm_ps {
 	uint32_t id;
 	char socket[30];
 	char binary[30];
+	char bitstream[30];
 	char net[30];
 	char mig_file[30];
 };
@@ -301,7 +302,8 @@ static char *rcv_args(int socket, int *rc)
 static struct ukvm_ps *msg_from_primary(int socket, int *ret)
 {
 	int rc;
-	uint8_t *buf;
+	uint8_t *buf_binary;
+	uint8_t *buf_bitstream;
 	struct com_nod node_com;
 	struct ukvm_ps *ps_ukvm = NULL;
 
@@ -324,24 +326,30 @@ static struct ukvm_ps *msg_from_primary(int socket, int *ret)
 		char *args = NULL;
 
 		memset(ps_ukvm->socket, 0, 30*sizeof(char));
+		memset(ps_ukvm->bitstream, 0, 30*sizeof(char));
 		memset(ps_ukvm->binary, 0, 30*sizeof(char));
 		/*
 		 * Receive and store the binary to deploy
 		 */
-		buf = read_file_n(socket, node_com.tsk.size);
-		if (!buf)
+		buf_binary = read_file_n(socket, node_com.tsk.size);
+		if (!buf_binary)
 			goto ret_1;
 
 		sprintf(ps_ukvm->binary, "/tmp/binary_0.ukvm");
 		sprintf(ps_ukvm->socket, "--mon=/tmp/ukvm0.sock");
+		sprintf(ps_ukvm->bitstream, "/tmp/bitstream_0.ukvm");
 		ps_ukvm->id = node_com.tsk.id;
-		rc = write_file_n(buf, node_com.tsk.size, ps_ukvm->binary);
-		free(buf);
+		rc = write_file_n(buf_binary, node_com.tsk.size, ps_ukvm->binary);
+		free(buf_binary);
 		if (rc < 0)
 			goto ret_1;
-		buf = read_file_n(socket, node_com.tsk.bs_size);
-		if (!buf) 
+		buf_bitstream = read_file_n(socket, node_com.tsk.bs_size);
+		if (!buf_bitstream) 
 			goto ret_1;
+		rc = write_file_n(buf_bitstream, node_com.tsk.bs_size, ps_ukvm->bitstream);
+		if (rc < 0)
+			goto ret_1;
+		free(buf_bitstream);
 		args = rcv_args(socket, &rc);
 		if (rc < 0)
 			goto ret_1;
@@ -357,23 +365,29 @@ static struct ukvm_ps *msg_from_primary(int socket, int *ret)
 
 		memset(ps_ukvm->socket, 0, 30*sizeof(char));
 		memset(ps_ukvm->binary, 0, 30*sizeof(char));
+		memset(ps_ukvm->bitstream, 0, 30*sizeof(char));
 		/*
 		 * Receive and store the binary to deploy
 		 */
-		buf = read_file_n(socket, node_com.tsk.size);
-		if (!buf)
+		buf_binary = read_file_n(socket, node_com.tsk.size);
+		if (!buf_binary)
 			goto ret_1;
 
 		sprintf(ps_ukvm->binary, "/tmp/binary_1.ukvm");
 		sprintf(ps_ukvm->socket, "--mon=/tmp/ukvm1.sock");
+		sprintf(ps_ukvm->bitstream, "/tmp/bitstream_1.ukvm");
 		ps_ukvm->id = node_com.tsk.id;
-		rc = write_file_n(buf, node_com.tsk.size, ps_ukvm->binary);
-		free(buf);
+		rc = write_file_n(buf_binary, node_com.tsk.size, ps_ukvm->binary);
+		free(buf_binary);
 		if (rc < 0)
 			goto ret_1;
-		buf = read_file_n(socket, node_com.tsk.bs_size);
-		if (!buf) 
+		buf_bitstream = read_file_n(socket, node_com.tsk.bs_size);
+		if (!buf_bitstream) 
 			goto ret_1;
+		rc = write_file_n(buf_bitstream, node_com.tsk.bs_size, ps_ukvm->bitstream);
+		if (rc < 0)
+			goto ret_1;
+		free(buf_bitstream);
 		args = rcv_args(socket, &rc);
 		if (rc < 0)
 			goto ret_1;

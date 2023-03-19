@@ -271,7 +271,8 @@ struct ukvm_fpgainfo {
 struct ukvm_fpgainit {
   /* IN */
   // UKVM_GUEST_PTR: ukvm treats pointer's address just as a uint64_t value (ukvm_gpa_t)
-  UKVM_GUEST_PTR(void *) bs;
+  //UKVM_GUEST_PTR(void *) bs;
+  uint64_t bs;
   UKVM_GUEST_PTR(void *) wr_queue;
   UKVM_GUEST_PTR(void *) rd_queue;
   
