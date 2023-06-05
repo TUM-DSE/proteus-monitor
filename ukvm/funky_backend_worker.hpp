@@ -253,15 +253,46 @@ namespace funky_backend {
     public:
       Worker(struct fpga_thr_info& thr_info, void* rq_addr, void* wq_addr) 
         : m_thr_info(thr_info), 
-          m_fpga_context(
-              UKVM_CHECKED_GPA_P(thr_info.hv, thr_info.wr_queue, thr_info.wr_queue_len), 
-              UKVM_CHECKED_GPA_P(thr_info.hv, thr_info.rd_queue, thr_info.rd_queue_len)
-              ), 
+          //m_fpga_context(new funky_backend::AoclContext(
+          //    UKVM_CHECKED_GPA_P(thr_info.hv, thr_info.wr_queue, thr_info.wr_queue_len), 
+          //    UKVM_CHECKED_GPA_P(thr_info.hv, thr_info.rd_queue, thr_info.rd_queue_len)
+          //    )), 
           m_save_data(0), msg_read_queue(wq_addr), msg_write_queue(rq_addr)
-      {}
+      {
+        // ToDo: Distingish fpga vendor with a smarter way. UKVM should know fpga vendor in advance.
+
+
+        uint8_t fpga_vendor = 0; // Intel
+
+        auto devices = xcl::get_intel_devices();
+        if(devices.size() == 0) {
+          devices = xcl::get_xil_devices();
+          if(devices.size() == 0) {
+            fpga_vendor = 2; // Coyote
+          }
+          fpga_vendor = 1; // Xilinx
+        }
+
+        switch(fpga_vendor) {
+          case 0: 
+            m_fpga_context = new funky_backend::AoclContext(UKVM_CHECKED_GPA_P(thr_info.hv, thr_info.wr_queue, thr_info.wr_queue_len), UKVM_CHECKED_GPA_P(thr_info.hv, thr_info.rd_queue, thr_info.rd_queue_len));
+            break;
+          case 1:
+            m_fpga_context = new funky_backend::XoclContext(UKVM_CHECKED_GPA_P(thr_info.hv, thr_info.wr_queue, thr_info.wr_queue_len), UKVM_CHECKED_GPA_P(thr_info.hv, thr_info.rd_queue, thr_info.rd_queue_len));
+            break;
+          case 2:
+            m_fpga_context = new funky_backend::CoyoteContext(UKVM_CHECKED_GPA_P(thr_info.hv, thr_info.wr_queue, thr_info.wr_queue_len), UKVM_CHECKED_GPA_P(thr_info.hv, thr_info.rd_queue, thr_info.rd_queue_len));
+            break;
+          default:
+            std::cout << "Error: Invalid vendor number\n";
+            exit(EXIT_FAILURE);
+        }
+      }
 
       ~Worker()
-      {}
+      {
+        delete m_fpga_context;
+      }
 
       /* Reconfigure FPGA */
       void reconfigure_fpga()
@@ -269,7 +300,7 @@ namespace funky_backend {
         //void* bitstream = UKVM_CHECKED_GPA_P(m_thr_info.hv, m_thr_info.bs, m_thr_info.bs_len);
         void* bitstream = (void*) m_thr_info.bs;
 
-        auto ret = m_fpga_context.reconfigure_fpga(bitstream, m_thr_info.bs_len);
+        auto ret = m_fpga_context->reconfigure_fpga(bitstream, m_thr_info.bs_len);
         if(ret != CL_SUCCESS)
         {
           std::cout << "UKVM: failed to program device. \n";
@@ -279,29 +310,29 @@ namespace funky_backend {
 
       int handle_fpga_requests()
       {
-        auto num = funky_backend::handle_fpga_requests(m_thr_info.hv, &m_fpga_context);
+        auto num = funky_backend::handle_fpga_requests(m_thr_info.hv, m_fpga_context);
         return num;
       }
 
       bool is_fpga_updated()
       {
-        return m_fpga_context.get_updated_flag();
+        return m_fpga_context->get_updated_flag();
       }
 
       /* return true if FPGA is at a sync point */
       bool check_sync_point()
       {
-        return m_fpga_context.get_sync_flag();
+        return m_fpga_context->get_sync_flag();
       }
 
       void sync_fpga_by_worker()
       {
-        m_fpga_context.sync_fpga();
+        m_fpga_context->sync_fpga();
       }
 
       std::vector<uint8_t>& save_fpga()
       {
-        return m_fpga_context.save_fpga_memory();
+        return m_fpga_context->save_fpga_memory();
       }
 
       bool load_fpga()
@@ -309,7 +340,7 @@ namespace funky_backend {
         if(m_thr_info.mig_data==NULL)
           return false;
 
-        auto ret = m_fpga_context.load_fpga_memory(
+        auto ret = m_fpga_context->load_fpga_memory(
             m_thr_info.hv, 
             m_thr_info.mig_data, 
             m_thr_info.mig_size);
@@ -320,7 +351,7 @@ namespace funky_backend {
 
       void sync_fpga_memory()
       {
-        m_fpga_context.sync_shared_buffers();
+        m_fpga_context->sync_shared_buffers();
       }
 
       bool handle_migration_requests(void)
@@ -372,7 +403,7 @@ namespace funky_backend {
 
     private:
       struct fpga_thr_info m_thr_info;
-      funky_backend::ClContext m_fpga_context;
+      funky_backend::ClContext* m_fpga_context;
       std::vector<uint8_t> m_save_data;
       buffer::Reader<struct thr_msg> msg_read_queue;
       buffer::Writer<struct thr_msg> msg_write_queue;
