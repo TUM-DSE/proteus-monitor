@@ -888,6 +888,7 @@ namespace funky_backend {
       struct cProcess* cproc;
       std::map<int, CoyoteBuffer> buffers;
       void* bs_vaddr;
+      std::map<int, CoyoteArg> args;
 
     private:
       void load_bitstream(std::string name) {
@@ -1007,7 +1008,7 @@ namespace funky_backend {
         if(host_ptr != nullptr)
           mem_flags = mem_flags | CL_MEM_USE_HOST_PTR;
 
-        buffers.emplace(mem_id, CoyoteBuffer {mem_flags, size, host_ptr, cproc->getMem({CoyoteAlloc::REG_4K, (size + pageSize - 1) / pageSize})});
+        buffers.emplace(mem_id, CoyoteBuffer {mem_flags, size, host_ptr, cproc->getMem({CoyoteAlloc::REG_4K, ((unsigned int)size + pageSize - 1) / pageSize})});
 
         std::cout << "Succeeded to create buffer " << mem_id << std::endl;
 
@@ -1027,26 +1028,27 @@ namespace funky_backend {
         }
 
         if(flags == 0) { // HOST->FPGA
-          for (size_t i =0; i<id_num, i++) {
+          for (size_t i =0; i<id_num; i++) {
             auto buffer = buffers[mem_ids[i]];
             auto flag = buffer.mem_flags;
             if ((flag&CL_MEM_READ_ONLY) == CL_MEM_READ_ONLY) {
               DEBUG_STREAM("This execution is prohibited.");
               break;
             }
-            cproc->invoke(CoyoteOper::OFFLOAD, buffer.host_ptr, buffer.mem_ptr, buffer.size, buffer.size); // ToDo?: Size
+            cproc->invoke({CoyoteOper::OFFLOAD, buffer.host_ptr, buffer.mem_ptr, (uint32_t)buffer.size, (uint32_t)buffer.size}); // ToDo?: Size
           }
           DEBUG_STREAM("Writing data to GMEM... ");
         }
 
         else { // FPGA->HOST
-          for (size_t i =0; i<id_num, i++) {
+          for (size_t i =0; i<id_num; i++) {
             auto buffer = buffers[mem_ids[i]];
+            auto flag = buffer.mem_flags;
             if ((flag&CL_MEM_WRITE_ONLY) == CL_MEM_WRITE_ONLY) {
               DEBUG_STREAM("This execution is prohibited.");
               break;
             }
-            cproc->invoke(CoyoteOper::SYNC, buffer.mem_ptr, buffer.host_ptr, buffer.size, buffer.size);
+            cproc->invoke({CoyoteOper::SYNC, buffer.mem_ptr, buffer.host_ptr, (uint32_t)buffer.size, (uint32_t)buffer.size});
           }
           DEBUG_STREAM("Reading data from GMEM... ");
         }
@@ -1068,7 +1070,7 @@ namespace funky_backend {
               DEBUG_STREAM("This execution is prohibited.");
               break;
             }
-            cproc->invoke(CoyoteOper::OFFLOAD, ptr, buffer.mem_ptr, size, size);
+            cproc->invoke({CoyoteOper::OFFLOAD, ptr, buffer.mem_ptr, (uint32_t)size, (uint32_t)size});
             //OCL_CHECK(err, err = queues[cmdq_id].enqueueWriteBuffer(buffers[id], (cl_bool)flags, offset, size, ptr, list_ptr, event_ptr));
 
             /* if write, set a dirty flag */
@@ -1080,7 +1082,7 @@ namespace funky_backend {
               break;
             }
             //OCL_CHECK(err, err = queues[cmdq_id].enqueueReadBuffer(buffers[id], (cl_bool)flags, offset, size, ptr, list_ptr, event_ptr));
-            cproc->invoke(CoyoteOper::SYNC, buffer.mem_ptr, ptr. size, size);
+            cproc->invoke({CoyoteOper::SYNC, buffer.mem_ptr, ptr, (uint32_t)size, (uint32_t)size});
           }
         }
 
@@ -1089,25 +1091,12 @@ namespace funky_backend {
       }
 
       void create_kernel(const char* kernel_name) {
-        cl_int err;
-
-        auto search = kernels.find(kernel_name);
-        if(search == kernels.end()) {
-          /* use kernel name as an index */
-          OCL_CHECK(err, kernels.emplace(kernel_name, cl::Kernel(*program, kernel_name, &err)));
-          return;
-        }
-
-        // if the same kernel already exists, skip the creation and use the existing one. 
         DEBUG_STREAM("The specified kernel " << kernel_name << " is found. Nothing is done here. ");
       }
 
 
       void set_arg(const char* kernel_name, funky_msg::arg_info* arg, void* src=nullptr)
       {
-        cl_int err;
-        auto id = kernel_name;
-
         if(arg->mem_id == -1) {
           /* variables other than OpenCL memory objects */
           if(src == nullptr) {
@@ -1117,12 +1106,12 @@ namespace funky_backend {
 
           DEBUG_STREAM("set scalar (addr: " << src << ", size: " << arg->size << ") to arg[" << arg->index << "]" );
           DEBUG_STREAM("scalar value: " << *(unsigned int*)src);
-          OCL_CHECK(err, err = kernels[id].setArg(arg->index, arg->size, (const void*)src));
+          args.emplace(arg->index, CoyoteArg{NULL, arg->size, src});
         }
         else {
           DEBUG_STREAM("set memobj[" << arg->mem_id << "] to arg[" << arg->index << "]" );
           /* OpenCL memory objects */
-          OCL_CHECK(err, err = kernels[id].setArg(arg->index, buffers[arg->mem_id]));
+          args.emplace(arg->index, CoyoteArg{&buffers[arg->mem_id], arg->size, NULL});
 
           /* Memory objects specified as kernel arguments must be on FPGA */
           buffer_onfpga_flags[arg->mem_id] = true;
@@ -1131,33 +1120,51 @@ namespace funky_backend {
 
       void enqueue_kernel(int cmdq_id, const char* kernel_name, size_t ndparams[3], unsigned int num_events, int* event_list_ids, int event_id)
       {
-        cl_int err;
-        auto id = kernel_name;
-
-        /* create a cmd queue if not exists */
-        auto queue_in_map = queues.find(cmdq_id);
-        if(queue_in_map == queues.end()) {
-          OCL_CHECK(err,  queues.emplace(cmdq_id, cl::CommandQueue(context, device, CL_QUEUE_PROFILING_ENABLE, &err)));
-          DEBUG_STREAM("UKVM: new cmd queue (id: " << cmdq_id << ") is created. ");
+        //Assuming idx0 is input and idx1 is output.
+        if (args[0].buffer == NULL && args[1].buffer == NULL) {
+          cproc->invoke({CoyoteOper::WRITE, args[0].src, args[1].src, (uint32_t)args[0].size, (uint32_t)args[1].size}); 
         }
-
-        /* create a new event */
-        DEBUG_STREAM("event id: " << event_id);
-        auto event_ptr = (event_id  >= 0)? create_event(event_id): nullptr;
-
-        /* wait for events in the waiting list */
-        std::vector<cl::Event> wait_list;
-        update_event_list(wait_list, num_events, event_list_ids);
-        auto list_ptr  = (wait_list.size() > 0)? &wait_list: nullptr;
-
-        /* TODO: support for enqueueNDRangeKernel() */
-        // For HLS kernels global and local size is always (1,1,1). So, it is recommended
-        // to always use enqueueTask() for invoking HLS kernel
-        // OCL_CHECK(err, err = queues[cmdq_id].enqueueTask(kernels[id], list_ptr, event_ptr));
-        OCL_CHECK(err, err = queues[cmdq_id].enqueueNDRangeKernel(kernels[id], ndparams[0], ndparams[1], ndparams[2], list_ptr, event_ptr));
+        else if (args[0].buffer == NULL) {
+          if (args[1].buffer->mem_flags == CL_MEM_READ_ONLY) {
+            DEBUG_STREAM("This execution is prohibited.");
+            return;
+          }
+          cproc->invoke({CoyoteOper::WRITE, args[0].src, args[1].buffer->mem_ptr, (uint32_t)args[0].size, (uint32_t)args[1].buffer->size}); 
+        }
+        else if(args[1].buffer == NULL) {
+          if (args[0].buffer->mem_flags == CL_MEM_WRITE_ONLY) {
+            DEBUG_STREAM("This execution is prohibited.");
+            return;
+          }
+          cproc->invoke({CoyoteOper::WRITE, args[0].buffer->mem_ptr, args[1].src, (uint32_t)args[0].buffer->size, (uint32_t)args[1].size}); 
+        } else {
+          if (args[0].buffer->mem_flags == CL_MEM_WRITE_ONLY || args[1].buffer->mem_flags == CL_MEM_READ_ONLY) {
+            DEBUG_STREAM("This execution is prohibited.");
+            return;
+          }
+          cproc->invoke({CoyoteOper::WRITE, args[0].buffer->mem_ptr, args[1].buffer->mem_ptr, (uint32_t)args[0].buffer->size, (uint32_t)args[1].buffer->size}); 
+        }
 
         sync_flag = false;
         updated_flag = true;
+      }
+
+      void sync_fpga(void)
+      {
+        DEBUG_STREAM("sync all cmdq.");
+        std::cout << "MIG: sync all cmdq. \n";
+
+        cproc->checkCompleted(CoyoteOper::WRITE);
+
+        sync_flag=true;
+      }
+
+      void sync_fpga(int cmdq_id)
+      {
+        DEBUG_STREAM("sync cmdq (id: " << cmdq_id << ")");
+        cproc->checkCompleted(CoyoteOper::WRITE);
+
+        sync_flag=true;
       }
       
       
@@ -1169,15 +1176,8 @@ namespace funky_backend {
       int get_created_buffer_num() {return 0;}
       cl::Event* create_event(unsigned int event_id) {return NULL;}
       void update_event_list(std::vector<cl::Event>& event_list, unsigned int num_events, int* event_list_ids) {return;}
-      //void create_kernel(const char* kernel_name) {return;}
-      //void set_arg(const char* kernel_name, funky_msg::arg_info* arg, void* src=nullptr) {return;}
-      //void enqueue_kernel(int cmdq_id, const char* kernel_name, size_t ndparams[3], unsigned int num_events, int* event_list_ids, int event_id) {return;}
-      //void enqueue_transfer(int cmdq_id, int mem_ids[], size_t id_num, uint64_t flags, unsigned int num_events, int* event_list_ids, int event_id) {return;}
-      void enqueue_transfer(int cmdq_id, int mem_ids[], size_t id_num, uint64_t flags, size_t offset, size_t size, void *ptr, bool is_write, unsigned int num_events, int* event_list_ids, int event_id) {return;}
       void get_profiling_info(int event_id, cl_profiling_info param_name, void* param_value) {return;}
       void wait_for_events(unsigned int num_events, int* event_list_ids) {return;}
-      void sync_fpga(void) {return;}
-      void sync_fpga(int cmdq_id) {return;}
       void save_bitstream(uint64_t addr, size_t size) {return;}
       bool get_sync_flag() {return true;}
       bool get_updated_flag() {return true;}
