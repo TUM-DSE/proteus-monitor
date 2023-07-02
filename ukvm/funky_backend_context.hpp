@@ -77,16 +77,27 @@ namespace funky_backend {
       /** 
        * receive a request by polling the cmd queue 
        */
-      virtual funky_msg::request* pop_request() = 0;
+      funky_msg::request* pop_request() {
+        return request_q.pop();
+      }
 
-      virtual funky_msg::request* read_request() = 0;
+      funky_msg::request* read_request() {
+        return request_q.read();
+      }
 
-      virtual void update_readq() = 0;
+      void update_readq() {
+        request_q.update();
+      }
 
       /**  
        * sending a response to the guest via cmd queue
        */
-      virtual bool send_response(funky_msg::ReqType type) = 0;
+      bool send_response(funky_msg::ReqType type) {
+        DEBUG_STREAM("send a response to the guest. type: " << type);
+
+        funky_msg::response response(type);
+        return response_q.push(response);
+      }
 
       /** 
        * reconfigure FPGA with a bitstream 
@@ -164,9 +175,13 @@ namespace funky_backend {
        */
       virtual void save_bitstream(uint64_t addr, size_t size) = 0;
 
-      virtual bool get_sync_flag() = 0;
+      bool get_sync_flag() {
+        return sync_flag;
+      }
 
-      virtual bool get_updated_flag() = 0;
+      bool get_updated_flag() {
+        return updated_flag;
+      }
 
       virtual void sync_shared_buffers() = 0;
 
@@ -197,34 +212,7 @@ namespace funky_backend {
 
         virtual ~AXClContext()
         {}
-        /** 
-         * receive a request by polling the cmd queue 
-         */
-        funky_msg::request* pop_request()
-        {
-          return request_q.pop();
-        }
-
-        funky_msg::request* read_request()
-        {
-          return request_q.read();
-        }
-
-        void update_readq()
-        {
-          request_q.update();
-        }
-
-        /**  
-         * sending a response to the guest via cmd queue
-         */
-        bool send_response(funky_msg::ReqType type)
-        {
-          DEBUG_STREAM("send a response to the guest. type: " << type);
-
-          funky_msg::response response(type);
-          return response_q.push(response);
-        }
+      
 
         /** 
          * reconfigure FPGA with a bitstream 
@@ -594,16 +582,6 @@ namespace funky_backend {
           bin_size = size;
         }
 
-        bool get_sync_flag()
-        {
-          return sync_flag;
-        }
-
-        bool get_updated_flag()
-        {
-          return updated_flag;
-        }
-
         void sync_shared_buffers()
         {
           auto queue = queues[0];
@@ -939,7 +917,7 @@ namespace funky_backend {
         return CL_SUCCESS;
       }
       
-      /*
+      
       bool load_fpga_memory(struct ukvm_hv *hv, void* load_data, size_t load_data_size) { //Todo: for migration
         auto current_ptr = (uint8_t *)load_data;
         auto end_ptr = (uint8_t *)load_data + load_data_size;
@@ -972,23 +950,23 @@ namespace funky_backend {
           // write memobj back into FPGA memory 
           if(h->onfpga_flag) 
           {
-            cl_int err;
+            //cl_int err;
             // load data from a host-side buffer in guest memory 
             if(h->mem_flags & CL_MEM_USE_HOST_PTR) {
-              OCL_CHECK(err, err = queues[0].enqueueMigrateMemObjects({buffers[h->mem_id]}, 0));
+              //OCL_CHECK(err, err = queues[0].enqueueMigrateMemObjects({buffers[h->mem_id]}, 0));
+              cproc->invoke({CoyoteOper::OFFLOAD, buffers[h->mem_id].host_ptr, buffers[h->mem_id].mem_ptr, (uint32_t)buffers[h->mem_id].size, (uint32_t)buffers[h->mem_id].size});
             }
             // load data from a migration file 
             else {
-              OCL_CHECK(err, err = queues[0].enqueueWriteBuffer(buffers[h->mem_id], 
-                    CL_TRUE, 0, h->mem_size, current_ptr, nullptr, nullptr));
-
-              //cproc.invoke({CoyoteOper::READ, })
+              //OCL_CHECK(err, err = queues[0].enqueueWriteBuffer(buffers[h->mem_id], CL_TRUE, 0, h->mem_size, current_ptr, nullptr, nullptr));
+              cproc->invoke({CoyoteOper::OFFLOAD, current_ptr, buffers[h->mem_id].mem_ptr, (uint32_t)h->mem_size, (uint32_t)buffers[h->mem_id].size});
               current_ptr += h->mem_size;
             }
           }
 
           // sync FPGA
-          queues[0].finish();
+          //queues[0].finish();
+          cproc->checkCompleted(CoyoteOper::OFFLOAD);
         }
 
         if(current_ptr != end_ptr)
@@ -998,8 +976,6 @@ namespace funky_backend {
         updated_flag = true;
         return true;
       }
-      */
-      
 
       
       void create_buffer(int mem_id, uint64_t mem_flags, size_t size, void* host_ptr, void* gpa)
@@ -1166,33 +1142,23 @@ namespace funky_backend {
 
         sync_flag=true;
       }
-      
+
+      int get_created_buffer_num() {
+        return buffers.size();
+      }
       
 
-      funky_msg::request* pop_request() {return NULL;}
-      funky_msg::request* read_request() {return NULL;}
-      void update_readq() {return;}
-      bool send_response(funky_msg::ReqType type) {return true;}
-      int get_created_buffer_num() {return 0;}
       cl::Event* create_event(unsigned int event_id) {return NULL;}
       void update_event_list(std::vector<cl::Event>& event_list, unsigned int num_events, int* event_list_ids) {return;}
       void get_profiling_info(int event_id, cl_profiling_info param_name, void* param_value) {return;}
       void wait_for_events(unsigned int num_events, int* event_list_ids) {return;}
       void save_bitstream(uint64_t addr, size_t size) {return;}
-      bool get_sync_flag() {return true;}
-      bool get_updated_flag() {return true;}
+      //bool get_updated_flag() {return true;}
       void sync_shared_buffers() {return;}
       std::vector<uint8_t>& save_fpga_memory() {
         std::vector<uint8_t> v(1);
         return v;
       }
-      bool load_fpga_memory(struct ukvm_hv *hv, void* load_data, size_t load_data_size) {return true;}
-
-
-
-      
-
-
 
 
   }; // CoyoteContext
