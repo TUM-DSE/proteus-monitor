@@ -173,7 +173,10 @@ namespace funky_backend {
       /** 
        * functions for task migration 
        */
-      virtual void save_bitstream(uint64_t addr, size_t size) = 0;
+      void save_bitstream(uint64_t addr, size_t size) {
+        bin_guest_addr = addr;
+        bin_size = size;
+      }
 
       bool get_sync_flag() {
         return sync_flag;
@@ -571,15 +574,6 @@ namespace funky_backend {
           * the context has to manage the same number of sync flags. 
           */
           sync_flag=true;
-        }
-
-        /** 
-         * functions for task migration 
-         */
-        void save_bitstream(uint64_t addr, size_t size)
-        {
-          bin_guest_addr = addr;
-          bin_size = size;
         }
 
         void sync_shared_buffers()
@@ -1262,16 +1256,29 @@ namespace funky_backend {
       int get_created_buffer_num() {
         return buffers.size();
       }
+
+      void sync_shared_buffers()
+      {
+        for(auto it : buffers)
+        {
+          auto id = it.first;
+          auto buffer = it.second;
+          
+          auto mem_flags = buffer.mem_flags;
+
+          /* data transfer from FPGA to Host */
+          if( (mem_flags & CL_MEM_USE_HOST_PTR) && buffer_onfpga_flags[id] )
+            cproc->invoke({CoyoteOper::SYNC, buffer.mem_ptr, buffer.host_ptr, (uint32_t)buffer.size, (uint32_t)buffer.size});
+        }
+
+        cproc->checkCompleted(CoyoteOper::SYNC);
+      }
       
 
       cl::Event* create_event(unsigned int event_id) {return NULL;}
       void update_event_list(std::vector<cl::Event>& event_list, unsigned int num_events, int* event_list_ids) {return;}
       void get_profiling_info(int event_id, cl_profiling_info param_name, void* param_value) {return;}
       void wait_for_events(unsigned int num_events, int* event_list_ids) {return;}
-      void save_bitstream(uint64_t addr, size_t size) {return;}
-      //bool get_updated_flag() {return true;}
-      void sync_shared_buffers() {return;}
-
 
   }; // CoyoteContext
 } // funky_backend
