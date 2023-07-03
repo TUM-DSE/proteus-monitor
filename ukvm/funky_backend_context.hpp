@@ -916,6 +916,122 @@ namespace funky_backend {
 
         return CL_SUCCESS;
       }
+
+      std::vector<uint8_t>& save_fpga_memory()
+      {
+        size_t event_num;
+        std::vector<struct eventobj_header> eheaders;
+        std::vector<struct memobj_header> headers;
+        std::map<int, std::vector<uint8_t>> saved_obj;
+        size_t total_size = 0;
+
+        /* read event objects (profiling info) */
+        /*
+        * FIXME: save migrated_events as well. 
+        * Otherwise, when second or more migration happens, 
+        * eventobj info saved by the previous migration is thrown away. 
+        */
+
+        //event_num = events.size();
+        event_num = 0;
+        total_size += sizeof(event_num);
+        /*
+        for(auto it : events)
+        {
+          auto id = it.first;
+          auto event = it.second;
+          struct eventobj_header eheader;
+          eheader.event_id = id;
+          event.getProfilingInfo<uint64_t>(CL_PROFILING_COMMAND_QUEUED,  &eheader.profiling_info[0]);
+          event.getProfilingInfo<uint64_t>(CL_PROFILING_COMMAND_SUBMIT,  &eheader.profiling_info[1]);
+          event.getProfilingInfo<uint64_t>(CL_PROFILING_COMMAND_START,   &eheader.profiling_info[2]);
+          event.getProfilingInfo<uint64_t>(CL_PROFILING_COMMAND_END,     &eheader.profiling_info[3]);
+          // event.getProfilingInfo<uint64_t>(CL_PROFILING_COMMAND_COMPLETE,&eheader.profiling_info[4]);
+
+          eheaders.emplace_back(eheader);
+          total_size += sizeof(struct eventobj_header);
+        }
+        */
+
+        /* read memory objects */
+        for(auto it : buffers)
+        {
+          auto id = it.first;
+
+          struct memobj_header header = {
+            id, buffer_gpas[id], 0, 0, 0, buffer_onfpga_flags[id]
+          };
+
+          auto buffer = it.second; 
+          header.mem_size = buffer.size;
+          header.mem_type = CL_MEM_OBJECT_BUFFER;
+          header.mem_flags = buffer.mem_flags;
+          DEBUG_STREAM("buffer[" << id << "]: \n" 
+          << "gpa: 0x" << std::hex << header.gpa << ", size: " << header.mem_size 
+          << ", type: " << header.mem_type << ", flag: " << header.mem_flags 
+          << ", onfpga: " << header.onfpga_flag);
+
+          headers.emplace_back(header);
+          total_size += sizeof(struct memobj_header);
+
+          /* 
+          * if CL_MEM_USE_HOST_PTR is valid, 
+          * the object is already written in guest memory 
+          */
+          if(header.mem_flags & CL_MEM_USE_HOST_PTR)
+            continue;
+
+          /* Read data on FPGA */
+          if (header.onfpga_flag) {
+            saved_obj.emplace(id, std::vector<uint8_t>(header.mem_size));
+            auto data_ptr = saved_obj.find(id)->second.data();
+
+            //cl_int err;
+            //OCL_CHECK(err, err = queues[0].enqueueReadBuffer(buffer, CL_TRUE, 0, header.mem_size, data_ptr, nullptr, nullptr));
+            cproc->invoke({CoyoteOper::SYNC, buffer.mem_ptr, data_ptr, (uint32_t)buffer.size, (uint32_t)header.mem_size});
+            total_size += header.mem_size;
+          }
+        }
+        
+        /* sync FPGA */
+        //queues[0].finish();
+        cproc->checkCompleted(CoyoteOper::SYNC);
+
+        /* save data into a single buffer */
+        mig_save_data.resize(total_size);
+        uint8_t* mig_data_ptr = mig_save_data.data();
+
+        /* save eventobj */
+        std::memcpy((void*)mig_data_ptr, (void*)&event_num, sizeof(event_num));
+        mig_data_ptr += sizeof(event_num);
+        for(auto eheader : eheaders)
+        {
+          /* copy header */
+          std::memcpy((void*)mig_data_ptr, (void*)&eheader, sizeof(struct eventobj_header));
+          mig_data_ptr += sizeof(struct eventobj_header);
+        }
+
+        /* save memobj */
+        for(auto header : headers)
+        {
+          /* copy header */
+          std::memcpy((void*)mig_data_ptr, (void*)&header, sizeof(struct memobj_header));
+          mig_data_ptr += sizeof(struct memobj_header);
+
+          /* copy data */
+          // TODO: data copies here are redundant?
+          auto obj = saved_obj.find(header.mem_id);
+          if(obj != saved_obj.end()) {
+            auto src_data_ptr = saved_obj.find(header.mem_id)->second.data();
+            std::memcpy(mig_data_ptr, src_data_ptr, header.mem_size);
+            mig_data_ptr += header.mem_size;
+          }
+        }
+
+        DEBUG_STREAM("saved file size: " << total_size << " Bytes.");
+        DEBUG_STREAM("event num: " << event_num << ", memobj num: " << mig_save_data.size()); 
+        return mig_save_data;
+      }
       
       
       bool load_fpga_memory(struct ukvm_hv *hv, void* load_data, size_t load_data_size) { //Todo: for migration
@@ -1155,10 +1271,6 @@ namespace funky_backend {
       void save_bitstream(uint64_t addr, size_t size) {return;}
       //bool get_updated_flag() {return true;}
       void sync_shared_buffers() {return;}
-      std::vector<uint8_t>& save_fpga_memory() {
-        std::vector<uint8_t> v(1);
-        return v;
-      }
 
 
   }; // CoyoteContext
