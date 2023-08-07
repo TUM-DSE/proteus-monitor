@@ -80,7 +80,7 @@ static void hypercall_fpgainit(struct ukvm_hv *hv, ukvm_gpa_t gpa)
 
     fpga->bs_len = st.st_size;
 
-    void* buf = mmap(NULL, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+    void* buf = mmap(NULL, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0); // todo: munmap?
     if (buf == MAP_FAILED) {
         perror("mmap failed\n");
         exit(EXIT_FAILURE);
