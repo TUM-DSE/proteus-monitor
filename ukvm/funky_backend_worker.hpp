@@ -263,15 +263,23 @@ namespace funky_backend {
 
 
         uint8_t fpga_vendor = 0; // Intel
-
-        auto devices = xcl::get_intel_devices();
-        if(devices.size() == 0) {
-          devices = xcl::get_xil_devices();
+        /*
+        while(1) { 
+          auto devices = xcl::get_intel_devices();
+          std::cout << "this is unko" << std::endl;
           if(devices.size() == 0) {
-            fpga_vendor = 2; // Coyote
+            devices = xcl::get_xil_devices();
+            if(devices.size() == 0) {
+              fpga_vendor = 2; // Coyote
+              break;
+            }
+            fpga_vendor = 1; // Xilinx
+            break;
           }
-          fpga_vendor = 1; // Xilinx
+          break;
         }
+        */
+        fpga_vendor = 2;
 
         switch(fpga_vendor) {
           case 0: 

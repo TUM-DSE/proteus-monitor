@@ -60,7 +60,7 @@ static void hypercall_fpgainfo(struct ukvm_hv *hv, ukvm_gpa_t gpa)
 
 static void hypercall_fpgainit(struct ukvm_hv *hv, ukvm_gpa_t gpa)
 {
-    // printf("UKVM: set up fpga...\n");
+    printf("UKVM: set up fpga...\n");
 
     struct ukvm_fpgainit *fpga =
         UKVM_CHECKED_GPA_P(hv, gpa, sizeof (struct ukvm_fpgainit));

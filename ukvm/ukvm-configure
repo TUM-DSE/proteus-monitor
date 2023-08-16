@@ -137,7 +137,7 @@ for module in "$@"; do
 done
 
 if [ "${ENABLE_FUNKY}" = "yes" ]; then
-  UKVM_LDLIBS="-L/tools/Intel/intelFPGA_pro/20.2/hld/linux64/lib/ -L../Coyote/build_sw/ -lOpenCL -lpthread -lrt -lstdc++ -lcoyote " # for Funky backend
+  UKVM_LDLIBS="-L/tools/Intel/intelFPGA_pro/20.2/hld/linux64/lib/ -L../Coyote/ -lOpenCL -lpthread -lrt -lstdc++ -lcoyote " # for Funky backend
 
   FUNKY_CPP=${UKVM_CPP}  # for compiling Funky codes
   FUNKY_OBJS=
