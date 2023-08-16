@@ -263,7 +263,7 @@ namespace funky_backend {
 
 
         uint8_t fpga_vendor = 0; // Intel
-        /*
+        
         while(1) { 
           auto devices = xcl::get_intel_devices();
           std::cout << "this is unko" << std::endl;
@@ -278,8 +278,8 @@ namespace funky_backend {
           }
           break;
         }
-        */
-        fpga_vendor = 2;
+        
+        //fpga_vendor = 2;
 
         switch(fpga_vendor) {
           case 0: 

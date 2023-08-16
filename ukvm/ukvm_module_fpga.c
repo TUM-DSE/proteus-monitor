@@ -65,7 +65,7 @@ static void hypercall_fpgainit(struct ukvm_hv *hv, ukvm_gpa_t gpa)
     struct ukvm_fpgainit *fpga =
         UKVM_CHECKED_GPA_P(hv, gpa, sizeof (struct ukvm_fpgainit));
 
-    /*
+    
     int fd = open("/tmp/bitstream_0.ukvm", O_RDONLY);
     //int fd = open("/home/shu/funky-unikernel/xclbin/aria10/hello_world_emulation/hello_world.aocx", O_RDONLY);
     if (fd < 0) {
@@ -89,7 +89,7 @@ static void hypercall_fpgainit(struct ukvm_hv *hv, ukvm_gpa_t gpa)
     fpga->bs = (uint64_t) buf;
 
     close(fd);
-    */
+    
 
     /**
      * TODO: check if any FPGA is available for the guest
