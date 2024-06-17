@@ -33,7 +33,7 @@ solo5_result_t solo5_fpga_init(struct solo5_fpgainit* init_info)
 {
   struct ukvm_fpgainit vfpga;
 
-  vfpga.bs        = init_info->bs;
+  vfpga.bs        = (uint64_t)init_info->bs;
   vfpga.wr_queue  = init_info->wr_queue;
   vfpga.rd_queue  = init_info->rd_queue;
 
