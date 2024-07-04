@@ -17,8 +17,9 @@
 #include <vector>
 #include <map>
 #include <sys/mman.h>
+#include <any>
 
-#include "cProcess.hpp"
+#include <cThread.hpp>
 #include "funky_coyote_util.hpp"
 using namespace fpga;
 
@@ -857,15 +858,15 @@ namespace funky_backend {
 
   class CoyoteContext : public ClContext {
     protected:
-      struct cProcess* cproc;
+      struct cThread<std::any>* cthread;
       std::map<int, CoyoteBuffer> buffers;
       void* bs_vaddr;
       std::map<int, CoyoteArg> args;
-      std::map<CoyoteOper, int> oper_queue = {{CoyoteOper::OFFLOAD, 0},
-                                              {CoyoteOper::READ, 0},
-                                              {CoyoteOper::SYNC, 0},
-                                              {CoyoteOper::TRANSFER, 0},
-                                              {CoyoteOper::WRITE, 0}};
+      std::map<CoyoteOper, int> oper_queue = {{CoyoteOper::LOCAL_OFFLOAD, 0},
+                                              {CoyoteOper::LOCAL_READ, 0},
+                                              {CoyoteOper::LOCAL_SYNC, 0},
+                                              {CoyoteOper::LOCAL_TRANSFER, 0},
+                                              {CoyoteOper::LOCAL_WRITE, 0}};
 
     private:
       void load_bitstream(std::string name) {
@@ -880,7 +881,7 @@ namespace funky_backend {
         uint32_t n_pages = (len + hugePageSize - 1) / hugePageSize;
 
         // Get mem
-        void *vaddr = cproc->getMem({CoyoteAlloc::RCNFG_2M, n_pages});
+        void *vaddr = cthread->getMem({CoyoteAlloc::PRM, n_pages});
         uint32_t *vaddr_32 = reinterpret_cast<uint32_t *>(vaddr);
 
         // Read in
@@ -904,7 +905,7 @@ namespace funky_backend {
 
     public:
       CoyoteContext(void* wr_queue_addr, void* rd_queue_addr) : ClContext(wr_queue_addr, rd_queue_addr) {
-        cproc = new cProcess (0, getpid());
+        cthread = new cThread<std::any> (0, getpid(), 0);
       }
 
       ~CoyoteContext()
@@ -987,14 +988,20 @@ namespace funky_backend {
 
             //cl_int err;
             //OCL_CHECK(err, err = queues[0].enqueueReadBuffer(buffer, CL_TRUE, 0, header.mem_size, data_ptr, nullptr, nullptr));
-            cproc->invoke({CoyoteOper::SYNC, buffer.mem_ptr, data_ptr, (uint32_t)buffer.size, (uint32_t)header.mem_size});
+            sgEntry sg;
+            memset(&sg, 0, sizeof(localSg));
+            sg.local.src_addr = buffer.mem_ptr;
+            sg.local.src_len = buffer.size;
+            sg.local.dst_addr = data_ptr;
+            sg.local.dst_len = header.mem_size;
+            cthread->invoke(CoyoteOper::LOCAL_SYNC, &sg);
             total_size += header.mem_size;
           }
         }
         
         /* sync FPGA */
         //queues[0].finish();
-        //cproc->checkCompleted(CoyoteOper::SYNC);
+        //cthread->checkCompleted(CoyoteOper::LOCAL_SYNC);
         execute_all_queue();
 
         /* save data into a single buffer */
@@ -1070,20 +1077,32 @@ namespace funky_backend {
             // load data from a host-side buffer in guest memory 
             if(h->mem_flags & CL_MEM_USE_HOST_PTR) {
               //OCL_CHECK(err, err = queues[0].enqueueMigrateMemObjects({buffers[h->mem_id]}, 0));
-              cproc->invoke({CoyoteOper::OFFLOAD, buffers[h->mem_id].host_ptr, buffers[h->mem_id].mem_ptr, (uint32_t)buffers[h->mem_id].size, (uint32_t)buffers[h->mem_id].size, true, false});
-              oper_queue[CoyoteOper::OFFLOAD] += 1;
+              sgEntry sg;
+              memset(&sg, 0, sizeof(localSg));
+              sg.local.src_addr = buffers[h->mem_id].host_ptr;
+              sg.local.src_len = buffers[h->mem_id].size;
+              sg.local.dst_addr = buffers[h->mem_id].mem_ptr;
+              sg.local.dst_len = buffers[h->mem_id].size;
+              cthread->invoke(CoyoteOper::LOCAL_OFFLOAD, &sg);
+              oper_queue[CoyoteOper::LOCAL_OFFLOAD] += 1;
             }
             // load data from a migration file 
             else {
               //OCL_CHECK(err, err = queues[0].enqueueWriteBuffer(buffers[h->mem_id], CL_TRUE, 0, h->mem_size, current_ptr, nullptr, nullptr));
-              cproc->invoke({CoyoteOper::OFFLOAD, current_ptr, buffers[h->mem_id].mem_ptr, (uint32_t)h->mem_size, (uint32_t)buffers[h->mem_id].size});
+                          sgEntry sg;
+              memset(&sg, 0, sizeof(localSg));
+              sg.local.src_addr = current_ptr;
+              sg.local.src_len = h->mem_size;
+              sg.local.dst_addr = buffers[h->mem_id].mem_ptr;
+              sg.local.dst_len = buffers[h->mem_id].size;
+              cthread->invoke(CoyoteOper::LOCAL_OFFLOAD, &sg);
               current_ptr += h->mem_size;
             }
           }
 
           // sync FPGA
           //queues[0].finish();
-          //cproc->checkCompleted(CoyoteOper::OFFLOAD);
+          //cthread->checkCompleted(CoyoteOper::LOCAL_OFFLOAD);
           execute_all_queue();
         }
 
@@ -1102,7 +1121,7 @@ namespace funky_backend {
         if(host_ptr != nullptr)
           mem_flags = mem_flags | CL_MEM_USE_HOST_PTR;
 
-        buffers.emplace(mem_id, CoyoteBuffer {mem_flags, size, host_ptr, cproc->getMem({CoyoteAlloc::REG_4K, ((unsigned int)size + pageSize - 1) / pageSize})});
+        buffers.emplace(mem_id, CoyoteBuffer {mem_flags, size, host_ptr, cthread->getMem({CoyoteAlloc::REG, ((unsigned int)size + pageSize - 1) / pageSize})});
 
         std::cout << "Succeeded to create buffer " << mem_id << std::endl;
 
@@ -1129,8 +1148,14 @@ namespace funky_backend {
               DEBUG_STREAM("This execution is prohibited.");
               break;
             }
-            cproc->invoke({CoyoteOper::OFFLOAD, buffer.host_ptr, buffer.mem_ptr, (uint32_t)buffer.size, (uint32_t)buffer.size, true, false}); // ToDo?: Size
-            oper_queue[CoyoteOper::OFFLOAD] += 1;
+            sgEntry sg;
+            memset(&sg, 0, sizeof(localSg));
+            sg.local.src_addr = buffer.host_ptr;
+            sg.local.src_len = buffer.size;
+            sg.local.dst_addr = buffer.mem_ptr;
+            sg.local.dst_len = buffer.size;
+            cthread->invoke(CoyoteOper::LOCAL_OFFLOAD, &sg); // ToDo?: Size
+            oper_queue[CoyoteOper::LOCAL_OFFLOAD] += 1;
           }
           DEBUG_STREAM("Writing data to GMEM... ");
         }
@@ -1143,8 +1168,14 @@ namespace funky_backend {
               DEBUG_STREAM("This execution is prohibited.");
               break;
             }
-            cproc->invoke({CoyoteOper::SYNC, buffer.mem_ptr, buffer.host_ptr, (uint32_t)buffer.size, (uint32_t)buffer.size, true, false});
-            oper_queue[CoyoteOper::SYNC] += 1;
+            sgEntry sg;
+            memset(&sg, 0, sizeof(localSg));
+            sg.local.src_addr = buffer.mem_ptr;
+            sg.local.src_len = buffer.size;
+            sg.local.dst_addr = buffer.host_ptr;
+            sg.local.dst_len = buffer.size;
+            cthread->invoke(CoyoteOper::LOCAL_SYNC, &sg);
+            oper_queue[CoyoteOper::LOCAL_SYNC] += 1;
           }
           DEBUG_STREAM("Reading data from GMEM... ");
         }
@@ -1167,11 +1198,15 @@ namespace funky_backend {
               break;
             }
 
-            if ((cl_bool)flags) {
-              cproc->invoke({CoyoteOper::OFFLOAD, ptr, buffer.mem_ptr, (uint32_t)size, (uint32_t)size});
-            } else {
-              cproc->invoke({CoyoteOper::OFFLOAD, ptr, buffer.mem_ptr, (uint32_t)size, (uint32_t)size, true, false});
-              oper_queue[CoyoteOper::OFFLOAD] += 1;
+            sgEntry sg;
+            memset(&sg, 0, sizeof(localSg));
+            sg.local.src_addr = ptr;
+            sg.local.src_len = size;
+            sg.local.dst_addr = buffer.mem_ptr;
+            sg.local.dst_len = size;
+            cthread->invoke(CoyoteOper::LOCAL_OFFLOAD, &sg);
+            if (!(cl_bool)flags) {
+              oper_queue[CoyoteOper::LOCAL_OFFLOAD] += 1;
               //OCL_CHECK(err, err = queues[cmdq_id].enqueueWriteBuffer(buffers[id], (cl_bool)flags, offset, size, ptr, list_ptr, event_ptr));
             }
 
@@ -1184,11 +1219,15 @@ namespace funky_backend {
               break;
             }
             
-            if ((cl_bool)flags) {
-              cproc->invoke({CoyoteOper::SYNC, buffer.mem_ptr, ptr, (uint32_t)size, (uint32_t)size});
-            } else {
-              cproc->invoke({CoyoteOper::SYNC, buffer.mem_ptr, ptr, (uint32_t)size, (uint32_t)size, true, false});
-              oper_queue[CoyoteOper::SYNC] += 1;
+            sgEntry sg;
+            memset(&sg, 0, sizeof(localSg));
+            sg.local.src_addr = buffer.mem_ptr;
+            sg.local.src_len = size;
+            sg.local.dst_addr = ptr;
+            sg.local.dst_len = size;
+            cthread->invoke(CoyoteOper::LOCAL_SYNC, &sg);
+            if (!(cl_bool)flags) {
+              oper_queue[CoyoteOper::LOCAL_SYNC] += 1;
               //OCL_CHECK(err, err = queues[cmdq_id].enqueueReadBuffer(buffers[id], (cl_bool)flags, offset, size, ptr, list_ptr, event_ptr));
             }
           }
@@ -1228,34 +1267,50 @@ namespace funky_backend {
 
       void enqueue_kernel(int cmdq_id, const char* kernel_name, size_t ndparams[3], unsigned int num_events, int* event_list_ids, int event_id)
       {
+        sgEntry sg;
+        memset(&sg, 0, sizeof(localSg));
         //Assuming idx0 is input and idx1 is output.
         if (args[0].buffer == NULL && args[1].buffer == NULL) {
-          cproc->invoke({CoyoteOper::WRITE, args[0].src, args[1].src, (uint32_t)args[0].size, (uint32_t)args[1].size, true, false}); 
-          oper_queue[CoyoteOper::WRITE] += 1;
+          sg.local.src_addr = args[0].src;
+          sg.local.src_len = args[0].size;
+          sg.local.dst_addr = args[1].src;
+          sg.local.dst_len = args[1].size;
+          oper_queue[CoyoteOper::LOCAL_WRITE] += 1;
         }
         else if (args[0].buffer == NULL) {
           if (args[1].buffer->mem_flags == CL_MEM_READ_ONLY) {
             DEBUG_STREAM("This execution is prohibited.");
             return;
           }
-          cproc->invoke({CoyoteOper::WRITE, args[0].src, args[1].buffer->mem_ptr, (uint32_t)args[0].size, (uint32_t)args[1].buffer->size, true, false}); 
-          oper_queue[CoyoteOper::WRITE] += 1;
+          sg.local.src_addr = args[0].src;
+          sg.local.src_len = args[0].size;
+          sg.local.dst_addr = args[1].buffer->mem_ptr;
+          sg.local.dst_len = args[1].buffer->size;
+          oper_queue[CoyoteOper::LOCAL_WRITE] += 1;
         }
         else if(args[1].buffer == NULL) {
           if (args[0].buffer->mem_flags == CL_MEM_WRITE_ONLY) {
             DEBUG_STREAM("This execution is prohibited.");
             return;
           }
-          cproc->invoke({CoyoteOper::WRITE, args[0].buffer->mem_ptr, args[1].src, (uint32_t)args[0].buffer->size, (uint32_t)args[1].size, true, false}); 
-          oper_queue[CoyoteOper::WRITE] += 1;
+          sg.local.src_addr = args[0].buffer->mem_ptr;
+          sg.local.src_len = args[0].buffer->size;
+          sg.local.dst_addr = args[1].src;
+          sg.local.dst_len = args[1].size;
+          oper_queue[CoyoteOper::LOCAL_WRITE] += 1;
         } else {
           if (args[0].buffer->mem_flags == CL_MEM_WRITE_ONLY || args[1].buffer->mem_flags == CL_MEM_READ_ONLY) {
             DEBUG_STREAM("This execution is prohibited.");
             return;
           }
-          cproc->invoke({CoyoteOper::WRITE, args[0].buffer->mem_ptr, args[1].buffer->mem_ptr, (uint32_t)args[0].buffer->size, (uint32_t)args[1].buffer->size, true, false}); 
-          oper_queue[CoyoteOper::WRITE] += 1;
+          sg.local.src_addr = args[0].buffer->mem_ptr;
+          sg.local.src_len = args[0].buffer->size;
+          sg.local.dst_addr = args[1].buffer->mem_ptr;
+          sg.local.dst_len = args[1].buffer->size;
+          oper_queue[CoyoteOper::LOCAL_WRITE] += 1;
         }
+
+        cthread->invoke(CoyoteOper::LOCAL_WRITE, &sg);
 
         sync_flag = false;
         updated_flag = true;
@@ -1266,7 +1321,7 @@ namespace funky_backend {
         DEBUG_STREAM("sync all cmdq.");
         std::cout << "MIG: sync all cmdq. \n";
 
-        cproc->checkCompleted(CoyoteOper::WRITE);
+        cthread->checkCompleted(CoyoteOper::LOCAL_WRITE);
 
         sync_flag=true;
       }
@@ -1274,7 +1329,7 @@ namespace funky_backend {
       void sync_fpga(int cmdq_id)
       {
         DEBUG_STREAM("sync cmdq (id: " << cmdq_id << ")");
-        cproc->checkCompleted(CoyoteOper::WRITE);
+        cthread->checkCompleted(CoyoteOper::LOCAL_WRITE);
 
         sync_flag=true;
       }
@@ -1293,28 +1348,35 @@ namespace funky_backend {
           auto mem_flags = buffer.mem_flags;
 
           /* data transfer from FPGA to Host */
-          if( (mem_flags & CL_MEM_USE_HOST_PTR) && buffer_onfpga_flags[id] )
-            cproc->invoke({CoyoteOper::SYNC, buffer.mem_ptr, buffer.host_ptr, (uint32_t)buffer.size, (uint32_t)buffer.size, true, false});
-            oper_queue[CoyoteOper::SYNC] += 1;
+          if( (mem_flags & CL_MEM_USE_HOST_PTR) && buffer_onfpga_flags[id] ) {
+            sgEntry sg;
+            memset(&sg, 0, sizeof(localSg));
+            sg.local.src_addr = buffer.mem_ptr;
+            sg.local.src_len = buffer.size;
+            sg.local.dst_addr = buffer.host_ptr;
+            sg.local.dst_len = buffer.size;
+            cthread->invoke(CoyoteOper::LOCAL_SYNC, &sg);
+            oper_queue[CoyoteOper::LOCAL_SYNC] += 1;
+          }
         }
         execute_all_queue();
-        //cproc->checkCompleted(CoyoteOper::SYNC);
+        //cthread->checkCompleted(CoyoteOper::LOCAL_SYNC);
       }
 
       void execute_all_queue() {
-        while(cproc->checkCompleted(CoyoteOper::OFFLOAD) != oper_queue[CoyoteOper::OFFLOAD]);
-        while(cproc->checkCompleted(CoyoteOper::READ) != oper_queue[CoyoteOper::READ]);
-        while(cproc->checkCompleted(CoyoteOper::SYNC) != oper_queue[CoyoteOper::SYNC]);
-        while(cproc->checkCompleted(CoyoteOper::TRANSFER) != oper_queue[CoyoteOper::TRANSFER]);
-        while(cproc->checkCompleted(CoyoteOper::WRITE) != oper_queue[CoyoteOper::WRITE]);
+        while(cthread->checkCompleted(CoyoteOper::LOCAL_OFFLOAD) != oper_queue[CoyoteOper::LOCAL_OFFLOAD]);
+        while(cthread->checkCompleted(CoyoteOper::LOCAL_READ) != oper_queue[CoyoteOper::LOCAL_READ]);
+        while(cthread->checkCompleted(CoyoteOper::LOCAL_SYNC) != oper_queue[CoyoteOper::LOCAL_SYNC]);
+        while(cthread->checkCompleted(CoyoteOper::LOCAL_TRANSFER) != oper_queue[CoyoteOper::LOCAL_TRANSFER]);
+        while(cthread->checkCompleted(CoyoteOper::LOCAL_WRITE) != oper_queue[CoyoteOper::LOCAL_WRITE]);
         
-        oper_queue[CoyoteOper::OFFLOAD] = 0;
-        oper_queue[CoyoteOper::READ] = 0;
-        oper_queue[CoyoteOper::SYNC] = 0;
-        oper_queue[CoyoteOper::TRANSFER] = 0;
-        oper_queue[CoyoteOper::WRITE] = 0;
+        oper_queue[CoyoteOper::LOCAL_OFFLOAD] = 0;
+        oper_queue[CoyoteOper::LOCAL_READ] = 0;
+        oper_queue[CoyoteOper::LOCAL_SYNC] = 0;
+        oper_queue[CoyoteOper::LOCAL_TRANSFER] = 0;
+        oper_queue[CoyoteOper::LOCAL_WRITE] = 0;
 
-        cproc->clearCompleted();
+        cthread->clearCompleted();
         return;
       }
       
