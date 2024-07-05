@@ -137,13 +137,25 @@ for module in "$@"; do
 done
 
 if [ "${ENABLE_FUNKY}" = "yes" ]; then
-  UKVM_LDLIBS="-L/tools/Intel/intelFPGA_pro/20.2/hld/linux64/lib/ -L${FUNKY_MONITOR}/Coyote/build_sw/ -lOpenCL -lpthread -lrt -lstdc++ -lCoyote " # for Funky backend
+  COYOTE_SRC=$(realpath ${UKVM_SRC}/../Coyote)
+  COYOTE_BUILD=${COYOTE_SRC}/build_sw
+  COYOTE_TARGET=coyote
+  COYOTE_RULE=$(cat << EOF
+.PHONY: ${COYOTE_TARGET}
+${COYOTE_TARGET}:
+	cmake -S ${COYOTE_SRC}/examples_sw -B ${COYOTE_BUILD} -DEXAMPLE=perf_local -DEN_GPU=0
+	\$(MAKE) -C ${COYOTE_BUILD}
+EOF
+)
+  COYOTE_RM="rm -rf ${COYOTE_BUILD}"
+
+  UKVM_LDLIBS="-L/tools/Intel/intelFPGA_pro/20.2/hld/linux64/lib/ -L${COYOTE_BUILD} -lOpenCL -lpthread -lrt -lstdc++ -lCoyote " # for Funky backend
 
   FUNKY_CPP=${UKVM_CPP}  # for compiling Funky codes
   FUNKY_OBJS=
   FUNKY_HEADERS=
   FUNKY_CPPFLAGS="-Wall -O0 -g -std=c++17"
-  FUNKY_INCLUDES="-I/tools/Intel/intelFPGA_pro/20.2/hld/include/ -I${XILINX_XRT}/include -I${FUNKY_MONITOR}/Coyote/sw/include"
+  FUNKY_INCLUDES="-I/tools/Intel/intelFPGA_pro/20.2/hld/include/ -I${XILINX_XRT}/include -I${COYOTE_SRC}/sw/include"
   add_funky_obj funky_backend_core.o funky_xcl2.o
   add_funky_header funky_backend_core.h funky_xcl2.hpp
 else
@@ -211,6 +223,8 @@ FUNKY_HEADERS=${FUNKY_HEADERS}
 
 \$(UKVM_OBJS) \$(FUNKY_OBJS): \$(UKVM_HEADERS) \$(FUNKY_HEADERS)
 
+${COYOTE_RULE}
+
 _build-ukvm:
 	mkdir -p _build-ukvm
 
@@ -223,7 +237,7 @@ _build-ukvm/ukvm_%.o: ${UKVM_SRC}/ukvm_%.c \$(MAKEFILE_LIST) | _build-ukvm
 _build-funky/funky_%.o: ${UKVM_SRC}/funky_%.cpp \$(MAKEFILE_LIST) | _build-funky
 	\$(FUNKY_CPP) \$(FUNKY_CPPFLAGS) \$(FUNKY_MACROS) \$(FUNKY_INCLUDES) -c $< -o \$@
 
-ukvm-bin: \$(UKVM_OBJS) \$(FUNKY_OBJS) \$(MAKEFILE_LIST)
+ukvm-bin: ${COYOTE_TARGET} \$(UKVM_OBJS) \$(FUNKY_OBJS) \$(MAKEFILE_LIST)
 	\$(UKVM_CPP) \$(UKVM_LDFLAGS) -o \$@ \$(UKVM_OBJS) \$(FUNKY_OBJS) \$(UKVM_LDLIBS)
 
 .PHONY: ukvm-clean
@@ -231,4 +245,5 @@ ukvm-clean:
 	rm -rf _build-ukvm
 	rm -rf _build-funky
 	rm -f ukvm-bin
+	${COYOTE_RM}
 EOF
