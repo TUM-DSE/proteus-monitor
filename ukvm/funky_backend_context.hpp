@@ -990,10 +990,12 @@ namespace funky_backend {
             //cl_int err;
             //OCL_CHECK(err, err = queues[0].enqueueReadBuffer(buffer, CL_TRUE, 0, header.mem_size, data_ptr, nullptr, nullptr));
             sgEntry sg{};
-            sg.local.src_addr = buffer.mem_ptr;
-            sg.local.src_len = buffer.size;
-            sg.local.dst_addr = data_ptr;
-            sg.local.dst_len = header.mem_size;
+            sg.local = {
+              .src_addr = buffer.mem_ptr,
+              .src_len = static_cast<uint32_t>(buffer.size),
+              .dst_addr = data_ptr,
+              .dst_len = static_cast<uint32_t>(header.mem_size),
+            };
             cthread->invoke(CoyoteOper::LOCAL_SYNC, &sg);
             total_size += header.mem_size;
           }
@@ -1078,10 +1080,12 @@ namespace funky_backend {
             if(h->mem_flags & CL_MEM_USE_HOST_PTR) {
               //OCL_CHECK(err, err = queues[0].enqueueMigrateMemObjects({buffers[h->mem_id]}, 0));
               sgEntry sg{};
-              sg.local.src_addr = buffers[h->mem_id].host_ptr;
-              sg.local.src_len = buffers[h->mem_id].size;
-              sg.local.dst_addr = buffers[h->mem_id].mem_ptr;
-              sg.local.dst_len = buffers[h->mem_id].size;
+              sg.local = {
+                .src_addr = buffers[h->mem_id].host_ptr,
+                .src_len = static_cast<uint32_t>(buffers[h->mem_id].size),
+                .dst_addr = buffers[h->mem_id].mem_ptr,
+                .dst_len = static_cast<uint32_t>(buffers[h->mem_id].size),
+              };
               cthread->invoke(CoyoteOper::LOCAL_OFFLOAD, &sg);
               oper_queue[CoyoteOper::LOCAL_OFFLOAD] += 1;
             }
@@ -1089,10 +1093,12 @@ namespace funky_backend {
             else {
               //OCL_CHECK(err, err = queues[0].enqueueWriteBuffer(buffers[h->mem_id], CL_TRUE, 0, h->mem_size, current_ptr, nullptr, nullptr));
               sgEntry sg{};
-              sg.local.src_addr = current_ptr;
-              sg.local.src_len = h->mem_size;
-              sg.local.dst_addr = buffers[h->mem_id].mem_ptr;
-              sg.local.dst_len = buffers[h->mem_id].size;
+              sg.local = {
+                .src_addr = current_ptr,
+                .src_len = static_cast<uint32_t>(h->mem_size),
+                .dst_addr = buffers[h->mem_id].mem_ptr,
+                .dst_len = static_cast<uint32_t>(buffers[h->mem_id].size),
+              };
               cthread->invoke(CoyoteOper::LOCAL_OFFLOAD, &sg);
               current_ptr += h->mem_size;
             }
@@ -1147,10 +1153,12 @@ namespace funky_backend {
               break;
             }
             sgEntry sg{};
-            sg.local.src_addr = buffer.host_ptr;
-            sg.local.src_len = buffer.size;
-            sg.local.dst_addr = buffer.mem_ptr;
-            sg.local.dst_len = buffer.size;
+            sg.local = {
+              .src_addr = buffer.host_ptr,
+              .src_len = static_cast<uint32_t>(buffer.size),
+              .dst_addr = buffer.mem_ptr,
+              .dst_len = static_cast<uint32_t>(buffer.size),
+            };
             cthread->invoke(CoyoteOper::LOCAL_OFFLOAD, &sg); // ToDo?: Size
             oper_queue[CoyoteOper::LOCAL_OFFLOAD] += 1;
           }
@@ -1166,10 +1174,12 @@ namespace funky_backend {
               break;
             }
             sgEntry sg{};
-            sg.local.src_addr = buffer.mem_ptr;
-            sg.local.src_len = buffer.size;
-            sg.local.dst_addr = buffer.host_ptr;
-            sg.local.dst_len = buffer.size;
+            sg.local = {
+              .src_addr = buffer.mem_ptr,
+              .src_len = static_cast<uint32_t>(buffer.size),
+              .dst_addr = buffer.host_ptr,
+              .dst_len = static_cast<uint32_t>(buffer.size),
+            };
             cthread->invoke(CoyoteOper::LOCAL_SYNC, &sg);
             oper_queue[CoyoteOper::LOCAL_SYNC] += 1;
           }
@@ -1195,10 +1205,12 @@ namespace funky_backend {
             }
 
             sgEntry sg{};
-            sg.local.src_addr = ptr;
-            sg.local.src_len = size;
-            sg.local.dst_addr = buffer.mem_ptr;
-            sg.local.dst_len = size;
+            sg.local = {
+              .src_addr = ptr,
+              .src_len = static_cast<uint32_t>(size),
+              .dst_addr = buffer.mem_ptr,
+              .dst_len = static_cast<uint32_t>(size),
+            };
             cthread->invoke(CoyoteOper::LOCAL_OFFLOAD, &sg);
             if (!(cl_bool)flags) {
               oper_queue[CoyoteOper::LOCAL_OFFLOAD] += 1;
@@ -1215,10 +1227,12 @@ namespace funky_backend {
             }
             
             sgEntry sg{};
-            sg.local.src_addr = buffer.mem_ptr;
-            sg.local.src_len = size;
-            sg.local.dst_addr = ptr;
-            sg.local.dst_len = size;
+            sg.local = {
+              .src_addr = buffer.mem_ptr,
+              .src_len = static_cast<uint32_t>(size),
+              .dst_addr = ptr,
+              .dst_len = static_cast<uint32_t>(size),
+            };
             cthread->invoke(CoyoteOper::LOCAL_SYNC, &sg);
             if (!(cl_bool)flags) {
               oper_queue[CoyoteOper::LOCAL_SYNC] += 1;
@@ -1264,10 +1278,12 @@ namespace funky_backend {
         sgEntry sg{};
         //Assuming idx0 is input and idx1 is output.
         if (args[0].buffer == NULL && args[1].buffer == NULL) {
-          sg.local.src_addr = args[0].src;
-          sg.local.src_len = args[0].size;
-          sg.local.dst_addr = args[1].src;
-          sg.local.dst_len = args[1].size;
+          sg.local = {
+            .src_addr = args[0].src,
+            .src_len = static_cast<uint32_t>(args[0].size),
+            .dst_addr = args[1].src,
+            .dst_len = static_cast<uint32_t>(args[1].size),
+          };
           oper_queue[CoyoteOper::LOCAL_WRITE] += 1;
         }
         else if (args[0].buffer == NULL) {
@@ -1275,10 +1291,12 @@ namespace funky_backend {
             DEBUG_STREAM("This execution is prohibited.");
             return;
           }
-          sg.local.src_addr = args[0].src;
-          sg.local.src_len = args[0].size;
-          sg.local.dst_addr = args[1].buffer->mem_ptr;
-          sg.local.dst_len = args[1].buffer->size;
+          sg.local = {
+            .src_addr = args[0].src,
+            .src_len = static_cast<uint32_t>(args[0].size),
+            .dst_addr = args[1].buffer->mem_ptr,
+            .dst_len = static_cast<uint32_t>(args[1].buffer->size),
+          };
           oper_queue[CoyoteOper::LOCAL_WRITE] += 1;
         }
         else if(args[1].buffer == NULL) {
@@ -1286,20 +1304,24 @@ namespace funky_backend {
             DEBUG_STREAM("This execution is prohibited.");
             return;
           }
-          sg.local.src_addr = args[0].buffer->mem_ptr;
-          sg.local.src_len = args[0].buffer->size;
-          sg.local.dst_addr = args[1].src;
-          sg.local.dst_len = args[1].size;
+          sg.local = {
+            .src_addr = args[0].buffer->mem_ptr,
+            .src_len = static_cast<uint32_t>(args[0].buffer->size),
+            .dst_addr = args[1].src,
+            .dst_len = static_cast<uint32_t>(args[1].size),
+          };
           oper_queue[CoyoteOper::LOCAL_WRITE] += 1;
         } else {
           if (args[0].buffer->mem_flags == CL_MEM_WRITE_ONLY || args[1].buffer->mem_flags == CL_MEM_READ_ONLY) {
             DEBUG_STREAM("This execution is prohibited.");
             return;
           }
-          sg.local.src_addr = args[0].buffer->mem_ptr;
-          sg.local.src_len = args[0].buffer->size;
-          sg.local.dst_addr = args[1].buffer->mem_ptr;
-          sg.local.dst_len = args[1].buffer->size;
+          sg.local = {
+            .src_addr = args[0].buffer->mem_ptr,
+            .src_len = static_cast<uint32_t>(args[0].buffer->size),
+            .dst_addr = args[1].buffer->mem_ptr,
+            .dst_len = static_cast<uint32_t>(args[1].buffer->size),
+          };
           oper_queue[CoyoteOper::LOCAL_WRITE] += 1;
         }
 
@@ -1343,10 +1365,12 @@ namespace funky_backend {
           /* data transfer from FPGA to Host */
           if( (mem_flags & CL_MEM_USE_HOST_PTR) && buffer_onfpga_flags[id] ) {
             sgEntry sg{};
-            sg.local.src_addr = buffer.mem_ptr;
-            sg.local.src_len = buffer.size;
-            sg.local.dst_addr = buffer.host_ptr;
-            sg.local.dst_len = buffer.size;
+            sg.local = {
+              .src_addr = buffer.mem_ptr,
+              .src_len = static_cast<uint32_t>(buffer.size),
+              .dst_addr = buffer.host_ptr,
+              .dst_len = static_cast<uint32_t>(buffer.size),
+            };
             cthread->invoke(CoyoteOper::LOCAL_SYNC, &sg);
             oper_queue[CoyoteOper::LOCAL_SYNC] += 1;
           }
