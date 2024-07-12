@@ -40,7 +40,7 @@ int allocate_fpga(void* wr_queue_addr, void* rd_queue_addr) {
     return -1;
   }
 
-  bk_context = std::make_unique<funky_backend::AoclContext>(wr_queue_addr, rd_queue_addr);
+  bk_context = std::make_unique<funky_backend::XoclContext>(wr_queue_addr, rd_queue_addr);
   //std::cout << "DISABLE_FPGA_THR is on." << std::endl;
   return 0;
 }

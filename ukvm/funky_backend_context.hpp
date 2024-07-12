@@ -862,11 +862,12 @@ namespace funky_backend {
       std::map<int, CoyoteBuffer> buffers;
       void* bs_vaddr;
       std::map<int, CoyoteArg> args;
-      std::map<CoyoteOper, int> oper_queue = {{CoyoteOper::LOCAL_OFFLOAD, 0},
-                                              {CoyoteOper::LOCAL_READ, 0},
-                                              {CoyoteOper::LOCAL_SYNC, 0},
-                                              {CoyoteOper::LOCAL_TRANSFER, 0},
-                                              {CoyoteOper::LOCAL_WRITE, 0}};
+      std::map<CoyoteOper, uint32_t> oper_queue = {
+          {CoyoteOper::LOCAL_OFFLOAD, 0},
+          {CoyoteOper::LOCAL_READ, 0},
+          {CoyoteOper::LOCAL_SYNC, 0},
+          {CoyoteOper::LOCAL_TRANSFER, 0},
+          {CoyoteOper::LOCAL_WRITE, 0}};
 
     private:
       void load_bitstream(std::string name) {
@@ -988,8 +989,7 @@ namespace funky_backend {
 
             //cl_int err;
             //OCL_CHECK(err, err = queues[0].enqueueReadBuffer(buffer, CL_TRUE, 0, header.mem_size, data_ptr, nullptr, nullptr));
-            sgEntry sg;
-            memset(&sg, 0, sizeof(localSg));
+            sgEntry sg{};
             sg.local.src_addr = buffer.mem_ptr;
             sg.local.src_len = buffer.size;
             sg.local.dst_addr = data_ptr;
@@ -1077,8 +1077,7 @@ namespace funky_backend {
             // load data from a host-side buffer in guest memory 
             if(h->mem_flags & CL_MEM_USE_HOST_PTR) {
               //OCL_CHECK(err, err = queues[0].enqueueMigrateMemObjects({buffers[h->mem_id]}, 0));
-              sgEntry sg;
-              memset(&sg, 0, sizeof(localSg));
+              sgEntry sg{};
               sg.local.src_addr = buffers[h->mem_id].host_ptr;
               sg.local.src_len = buffers[h->mem_id].size;
               sg.local.dst_addr = buffers[h->mem_id].mem_ptr;
@@ -1089,8 +1088,7 @@ namespace funky_backend {
             // load data from a migration file 
             else {
               //OCL_CHECK(err, err = queues[0].enqueueWriteBuffer(buffers[h->mem_id], CL_TRUE, 0, h->mem_size, current_ptr, nullptr, nullptr));
-                          sgEntry sg;
-              memset(&sg, 0, sizeof(localSg));
+              sgEntry sg{};
               sg.local.src_addr = current_ptr;
               sg.local.src_len = h->mem_size;
               sg.local.dst_addr = buffers[h->mem_id].mem_ptr;
@@ -1121,7 +1119,7 @@ namespace funky_backend {
         if(host_ptr != nullptr)
           mem_flags = mem_flags | CL_MEM_USE_HOST_PTR;
 
-        buffers.emplace(mem_id, CoyoteBuffer {mem_flags, size, host_ptr, cthread->getMem({CoyoteAlloc::REG, ((unsigned int)size + pageSize - 1) / pageSize})});
+        buffers.emplace(mem_id, CoyoteBuffer {mem_flags, size, host_ptr, cthread->getMem({CoyoteAlloc::REG, static_cast<uint32_t>(((unsigned int)size + pageSize - 1) / pageSize)})});
 
         std::cout << "Succeeded to create buffer " << mem_id << std::endl;
 
@@ -1148,8 +1146,7 @@ namespace funky_backend {
               DEBUG_STREAM("This execution is prohibited.");
               break;
             }
-            sgEntry sg;
-            memset(&sg, 0, sizeof(localSg));
+            sgEntry sg{};
             sg.local.src_addr = buffer.host_ptr;
             sg.local.src_len = buffer.size;
             sg.local.dst_addr = buffer.mem_ptr;
@@ -1168,8 +1165,7 @@ namespace funky_backend {
               DEBUG_STREAM("This execution is prohibited.");
               break;
             }
-            sgEntry sg;
-            memset(&sg, 0, sizeof(localSg));
+            sgEntry sg{};
             sg.local.src_addr = buffer.mem_ptr;
             sg.local.src_len = buffer.size;
             sg.local.dst_addr = buffer.host_ptr;
@@ -1198,8 +1194,7 @@ namespace funky_backend {
               break;
             }
 
-            sgEntry sg;
-            memset(&sg, 0, sizeof(localSg));
+            sgEntry sg{};
             sg.local.src_addr = ptr;
             sg.local.src_len = size;
             sg.local.dst_addr = buffer.mem_ptr;
@@ -1219,8 +1214,7 @@ namespace funky_backend {
               break;
             }
             
-            sgEntry sg;
-            memset(&sg, 0, sizeof(localSg));
+            sgEntry sg{};
             sg.local.src_addr = buffer.mem_ptr;
             sg.local.src_len = size;
             sg.local.dst_addr = ptr;
@@ -1267,8 +1261,7 @@ namespace funky_backend {
 
       void enqueue_kernel(int cmdq_id, const char* kernel_name, size_t ndparams[3], unsigned int num_events, int* event_list_ids, int event_id)
       {
-        sgEntry sg;
-        memset(&sg, 0, sizeof(localSg));
+        sgEntry sg{};
         //Assuming idx0 is input and idx1 is output.
         if (args[0].buffer == NULL && args[1].buffer == NULL) {
           sg.local.src_addr = args[0].src;
@@ -1349,8 +1342,7 @@ namespace funky_backend {
 
           /* data transfer from FPGA to Host */
           if( (mem_flags & CL_MEM_USE_HOST_PTR) && buffer_onfpga_flags[id] ) {
-            sgEntry sg;
-            memset(&sg, 0, sizeof(localSg));
+            sgEntry sg{};
             sg.local.src_addr = buffer.mem_ptr;
             sg.local.src_len = buffer.size;
             sg.local.dst_addr = buffer.host_ptr;

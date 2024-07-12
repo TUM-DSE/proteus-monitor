@@ -260,26 +260,25 @@ namespace funky_backend {
           m_save_data(0), msg_read_queue(wq_addr), msg_write_queue(rq_addr)
       {
         // ToDo: Distingish fpga vendor with a smarter way. UKVM should know fpga vendor in advance.
-
-
-        uint8_t fpga_vendor = 0; // Intel
         
-        while(1) { 
-          auto devices = xcl::get_intel_devices();
-          std::cout << "this is unko" << std::endl;
-          if(devices.size() == 0) {
-            devices = xcl::get_xil_devices();
-            if(devices.size() == 0) {
-              fpga_vendor = 2; // Coyote
-              break;
-            }
-            fpga_vendor = 1; // Xilinx
-            break;
-          }
-          break;
-        }
-        
-        //fpga_vendor = 2;
+        // while(1) {
+        //   auto devices = xcl::get_intel_devices();
+        //   std::cout << "this is unko" << std::endl;
+        //   if(devices.size() == 0) {
+        //     devices = xcl::get_xil_devices();
+        //     if(devices.size() == 0) {
+        //       fpga_vendor = 2; // Coyote
+        //       break;
+        //     }
+        //     fpga_vendor = 1; // Xilinx
+        //     break;
+        //   }
+        //   break;
+        // }
+
+        // Hardcode for now
+        uint8_t fpga_vendor = 1; // Xilinx
+        auto devices = xcl::get_xil_devices();
 
         switch(fpga_vendor) {
           case 0: 

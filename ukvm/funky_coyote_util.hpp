@@ -1,3 +1,7 @@
+#include <cstddef>
+#include <cstdint>
+#include <fstream>
+
 typedef struct CoyoteBuffer {
   uint64_t mem_flags;
   size_t size;
@@ -11,7 +15,7 @@ typedef struct CoyoteArg {
   void* src;
 } CoyoteArg;
 
-uint8_t readByte(ifstream &fb)
+uint8_t readByte(std::ifstream &fb)
 {
     char temp;
     fb.read(&temp, 1);
