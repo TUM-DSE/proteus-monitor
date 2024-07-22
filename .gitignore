@@ -13,7 +13,7 @@ ukvm/Makefile.ukvm
 ukvm/_build_ukvm/
 ukvm/ukvm-bin
 .vscode
-/.cache
+.cache
 compile_commands.json
 
 GPATH

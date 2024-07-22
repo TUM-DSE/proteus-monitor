@@ -276,11 +276,36 @@ void save_bitstreams(struct task *tsk) {
 		sprintf(key_id, "%d-%d", tsk->id, type);
 		resp = (redisReply*) redisCommand(connection, "SET %s %s", key_id, tsk->bitstreams[i]);
 		if (resp == NULL) {
-			err_print("failed to save a bitstream");
+			err_print("failed to save a bitstream\n");
 			redisFree(connection);
 			exit(-1);
 		}
+		freeReplyObject(resp);
 	}
+}
+
+char *load_bitstream(struct task *tsk, enum fpga_type type)
+{
+	char key_id[32];
+	snprintf(key_id, sizeof(key_id), "%d-%d", tsk->id, type);
+
+	redisReply *resp = redisCommand(connection, "GET %s", key_id);
+	if (resp == NULL) {
+		err_print("Failed to load bitstream from database\n");
+		redisFree(connection);
+		exit(EXIT_FAILURE);
+	} else if (resp->type == REDIS_REPLY_NIL) {
+		err_print("No entry in database for key '%s'\n", key_id);
+		redisFree(connection);
+		exit(EXIT_FAILURE);
+	} else if (resp->type != REDIS_REPLY_STRING) {
+		err_print("Expected a string from database\n");
+		redisFree(connection);
+		exit(EXIT_FAILURE);
+	}
+
+	// Leaking resp
+	return resp->str;
 }
 
 /*

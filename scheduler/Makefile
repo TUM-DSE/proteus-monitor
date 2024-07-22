@@ -1,8 +1,8 @@
 .PHONY: all
 all: primary daemon rest
 
-SCHED_CFLAGS  += -I/usr/local/include/hiredis
-SCHED_LDFLAGS := -pthread -lhiredis
+SCHED_CFLAGS  += -I/usr/local/include/hiredis -g -Og
+SCHED_LDFLAGS := -L/usr/local/lib -pthread -lhiredis
 
 primary: primary.o common.o
 	$(CC) $^ -o $@ $(SCHED_LDFLAGS)
