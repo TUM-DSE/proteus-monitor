@@ -344,7 +344,7 @@ char *load_bitstream(const struct task *tsk, enum fpga_type type)
 		goto err_free_reply;
 	}
 
-	// Leaking resp
+	// Leaking reply
 	return reply->str;
 
 err_free_reply:
