@@ -8,10 +8,13 @@
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
 #include <arpa/inet.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/un.h>
 #include <arpa/inet.h>
 #include <time.h>
+#include <fcntl.h>
 #include <hiredis.h>
 
 #include "common.h"
@@ -263,49 +266,92 @@ void print_task(struct task *task_to_print)
 	printf("\n");
 }
 
-enum fpga_type return_fpga_type(char* bin) { //ToDo: read binary and distinguish fpga_type (arria10, u50, etc...)
-	enum fpga_type ret;
-	return ret;
+enum fpga_type return_fpga_type(char *bin)
+{
+	//ToDo: read binary and distinguish fpga_type (arria10, u50, etc...)
+	return u50;
 }
 
-void save_bitstreams(struct task *tsk) {
-	redisReply* resp;
-	for (uint8_t i=0; i<tsk->num_bitstreams; i++) {
+/*
+ * Save all bitstreams of task `tsk` to database.
+ */
+void save_bitstreams(const struct task *tsk)
+{
+	uint8_t i = 0;
+	for (; i < tsk->num_bitstreams; i++) {
+		int fd = open(tsk->bitstreams[i], O_RDONLY);
+		if (fd == -1) {
+			err_print("Failed to open bitstream file");
+			goto err;
+		}
+
+		struct stat st;
+		if (fstat(fd, &st)) {
+			err_print("Failed to fstat bitstream file");
+			goto err;
+		}
+
+		off_t bitstream_size = st.st_size;
+		if (bitstream_size <= 0) {
+			err_print("Bitstream file is empty");
+			goto err;
+		}
+
+		char *raw_bitstream = mmap(0, bitstream_size, PROT_READ, MAP_PRIVATE, fd, 0);
+		if (raw_bitstream == MAP_FAILED) {
+			err_print("Failed to mmap bitstream file");
+			goto err;
+		}
+
 		enum fpga_type type = return_fpga_type(tsk->bitstreams[i]);
 		char key_id[32];
-		sprintf(key_id, "%d-%d", tsk->id, type);
-		resp = (redisReply*) redisCommand(connection, "SET %s %s", key_id, tsk->bitstreams[i]);
-		if (resp == NULL) {
-			err_print("failed to save a bitstream\n");
-			redisFree(connection);
-			exit(-1);
+		snprintf(key_id, sizeof(key_id), "%d-%d", tsk->id, type);
+
+		redisReply *reply =
+			redisCommand(connection, "SET %s %b", key_id, raw_bitstream, bitstream_size);
+		if (reply == NULL) {
+			err_print("Failed to save bitstream to redis db");
+			goto err;
 		}
-		freeReplyObject(resp);
+		freeReplyObject(reply);
 	}
+
+	return;
+
+err:
+	fprintf(stderr, ", filename: %s\n", tsk->bitstreams[i]);
+	redisFree(connection);
+	exit(EXIT_FAILURE);
 }
 
-char *load_bitstream(struct task *tsk, enum fpga_type type)
+/*
+ * Load bitstream of task `tsk` for fpga type `type` from database.
+ */
+char *load_bitstream(const struct task *tsk, enum fpga_type type)
 {
 	char key_id[32];
 	snprintf(key_id, sizeof(key_id), "%d-%d", tsk->id, type);
 
-	redisReply *resp = redisCommand(connection, "GET %s", key_id);
-	if (resp == NULL) {
+	redisReply *reply = redisCommand(connection, "GET %s", key_id);
+	if (reply == NULL) {
 		err_print("Failed to load bitstream from database\n");
-		redisFree(connection);
-		exit(EXIT_FAILURE);
-	} else if (resp->type == REDIS_REPLY_NIL) {
+		goto err;
+	} else if (reply->type == REDIS_REPLY_NIL) {
 		err_print("No entry in database for key '%s'\n", key_id);
-		redisFree(connection);
-		exit(EXIT_FAILURE);
-	} else if (resp->type != REDIS_REPLY_STRING) {
+		goto err_free_reply;
+	} else if (reply->type != REDIS_REPLY_STRING) {
 		err_print("Expected a string from database\n");
-		redisFree(connection);
-		exit(EXIT_FAILURE);
+		goto err_free_reply;
 	}
 
 	// Leaking resp
-	return resp->str;
+	return reply->str;
+
+err_free_reply:
+	freeReplyObject(reply);
+err:
+	redisFree(connection);
+	exit(EXIT_FAILURE);
 }
 
 /*
