@@ -64,12 +64,18 @@ enum msg_type {
 	migration
 };
 
+enum fpga_type {
+	arria10,
+	u50,
+	u280
+};
+
 struct task {
 	uint32_t id;
 	char *bin_path; 
 	char *bin_args; // Assumption: All bitstreams will have same args. 
 	char **bitstreams;
-	char *bitstream; // save path of a bitstream that will be sent
+	enum fpga_type selected_fpga; // FPGA selected by the scheduling algorithm
 	uint8_t priority;
 	enum task_state state;
 	struct node *node;	// the node where the task has been deployed
@@ -77,6 +83,7 @@ struct task {
 	struct task *prev;
 	uint8_t num_bitstreams;
 	uint32_t *frequencies;
+	size_t *sizes;
 #ifdef TIME_TASK
 	struct timespec tstart;
 	long secs;
@@ -133,12 +140,6 @@ struct notify_msg {
 		struct node_result nres;
 		struct mig_info migr_info;
 	};
-};
-
-enum fpga_type {
-	arria10,
-	u50,
-	u280
 };
 
 /*
@@ -236,6 +237,8 @@ static struct task *create_new_task(char *path, uint8_t num_bitstreams, char *fr
 			return NULL;
 		}
 	}
+	new_task->sizes = malloc(num_bitstreams * sizeof(size_t));
+	new_task->selected_fpga = u50;
 #ifdef TIME_TASK
 	clock_gettime(CLOCK_MONOTONIC, &new_task->tstart);
 #endif
@@ -253,6 +256,7 @@ void free_task(struct task *task_to_free)
 	{
 		free(task_to_free->bin_args);
 	}
+	free(task_to_free->sizes);
 	free(task_to_free);
 }
 
@@ -273,9 +277,9 @@ enum fpga_type return_fpga_type(char *bin)
 }
 
 /*
- * Save all bitstreams of task `tsk` to database.
+ * Save all bitstreams of task `tsk` to database and set `tsk->sizes`.
  */
-void save_bitstreams(const struct task *tsk)
+void save_bitstreams(struct task *tsk)
 {
 	uint8_t i = 0;
 	for (; i < tsk->num_bitstreams; i++) {
@@ -296,6 +300,8 @@ void save_bitstreams(const struct task *tsk)
 			err_print("Bitstream file is empty");
 			goto err;
 		}
+
+		tsk->sizes[i] = bitstream_size;
 
 		char *raw_bitstream = mmap(0, bitstream_size, PROT_READ, MAP_PRIVATE, fd, 0);
 		if (raw_bitstream == MAP_FAILED) {
@@ -327,10 +333,10 @@ err:
 /*
  * Load bitstream of task `tsk` for fpga type `type` from database.
  */
-char *load_bitstream(const struct task *tsk, enum fpga_type type)
+char *load_bitstream(const struct task *tsk)
 {
 	char key_id[32];
-	snprintf(key_id, sizeof(key_id), "%d-%d", tsk->id, type);
+	snprintf(key_id, sizeof(key_id), "%d-%d", tsk->id, tsk->selected_fpga);
 
 	redisReply *reply = redisCommand(connection, "GET %s", key_id);
 	if (reply == NULL) {
@@ -711,10 +717,10 @@ static int handle_node_comm(int epollfd, int con, int sched_efd, int snd_efd,
 			struct timespec start, end;
 			clock_gettime(CLOCK_MONOTONIC, &start);
 #endif
-			if (msg_node->type == deploy || msg_node->type == evict) { 
-				rc = send_binaries(con, msg_node->tsk->bin_path, "/home/shu/examples_aoc/hello_world/bin/hello_world.aocx", msg_node->type, msg_node->tsk->id); // "/home/shu/examples_aoc/hello_world/bin/hello_world.aocx"
-				//rc = send_binaries(con, msg_node->tsk->bin_path, msg_node->tsk->bitstream, msg_node->type, msg_node->tsk->id);
-				//rc = send_file(con, msg_node->tsk->bin_path, msg_node->type, msg_node->tsk->id);
+			if (msg_node->type == deploy || msg_node->type == evict) {
+				char *bitstream = load_bitstream(msg_node->tsk);
+				// TODO: proper msg_node->tsk->sizes
+				rc = send_binaries(con, msg_node->tsk->bin_path, bitstream, msg_node->tsk->sizes[0], msg_node->type, msg_node->tsk->id);
 #ifdef TIME_NCOM
 				clock_gettime(CLOCK_MONOTONIC, &end);
 				printf("Sending command and binary took %ld ms\n",

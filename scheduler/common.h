@@ -53,8 +53,16 @@ struct com_nod {
 
 
 int setup_socket(int epollfd, struct sockaddr *saddr, uint8_t tobind);
-ssize_t send_binaries(int socket, const char *binary, const char *bs, enum mnode_type msg_type, uint32_t id);
+
+/*
+ * Send binary at path `binary` and the raw bitstream pointed to by `bs` with size `bs_size` to
+ * `socket`.
+ */
+ssize_t send_binaries(int socket, const char *binary, const char *bs, size_t bs_size,
+					  enum mnode_type msg_type, uint32_t id);
+
 ssize_t send_file(int socket, const char *filename, enum mnode_type msg_type, uint32_t id);
+
 ssize_t write_with_check(int socket, void* addr, off_t size);
 
 #endif /* SCHED_COMMON_H */

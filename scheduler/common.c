@@ -69,53 +69,36 @@ err_set:
 	return -1;
 }
 
-ssize_t send_binaries(int socket, const char *binary, const char *bs, enum mnode_type msg_type, uint32_t id) {
-	struct stat st1, st2;
+ssize_t send_binaries(int socket, const char *binary, const char *bs, size_t bs_size,
+					  enum mnode_type msg_type, uint32_t id) {
+	struct stat st;
 	struct com_nod node_com = {0};
 
-	// mapping binaries
-	int fd1 = open(binary, O_RDONLY);
-	if (fd1 < 0) {
+	// mapping binary
+	int fd = open(binary, O_RDONLY);
+	if (fd < 0) {
 		perror("Opening binary file to send");
 		return -1;
 	}
-	int fd2 = open(bs, O_RDONLY);
-	if (fd2 < 0) {
-		perror("Opening bs file to send");
-		return -1;
-	}
 
-	int rc = fstat(fd1, &st1);
+	int rc = fstat(fd, &st);
 	if (rc < 0) {
 		perror("Getting binary file size");
 		return -1;
 	}
-	rc = fstat(fd2, &st2);
-	if (rc < 0) {
-		perror("Getting bs file size");
-		return -1;
-	}
 
-	void *new_addr1 = mmap(NULL, st1.st_size, PROT_READ, MAP_PRIVATE, fd1, 0);
-	if (new_addr1 == MAP_FAILED) {
+	void *bin_addr = mmap(NULL, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+	if (bin_addr == MAP_FAILED) {
         perror("mmap failed\n");
         return -1;
     }
 
-	void *new_addr2 = mmap(NULL, st2.st_size, PROT_READ, MAP_PRIVATE, fd2, 0);
-	if (new_addr2 == MAP_FAILED) {
-        perror("mmap failed\n");
-        return -1;
-    }
-
-	close(fd1);
-	close(fd2);
-
+	close(fd);
 
 	// sending com_nod
 	node_com.type = msg_type;
-	node_com.tsk.size = st1.st_size;
-	node_com.tsk.bs_size = st2.st_size;
+	node_com.tsk.size = st.st_size;
+	node_com.tsk.bs_size = bs_size;
 	node_com.tsk.id = id;
 	rc = write(socket, &node_com, sizeof(struct com_nod));
 	if (rc < sizeof(struct com_nod)) {
@@ -127,15 +110,10 @@ ssize_t send_binaries(int socket, const char *binary, const char *bs, enum mnode
 	}
 
 	// sending a uk binary and a bitstream
-	int res1 = write_with_check(socket, new_addr1, st1.st_size);
-	int res2 = write_with_check(socket, new_addr2, st2.st_size);
+	int res1 = write_with_check(socket, bin_addr, st.st_size);
+	int res2 = write_with_check(socket, (void *)bs, bs_size);
 
-	rc = munmap(new_addr1, st1.st_size);
-	if (rc < 0) {
-		perror("munmap");
-		return -1;
-	}
-	rc = munmap(new_addr2, st2.st_size);
+	rc = munmap(bin_addr, st.st_size);
 	if (rc < 0) {
 		perror("munmap");
 		return -1;
