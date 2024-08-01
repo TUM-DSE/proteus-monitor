@@ -757,8 +757,8 @@ static int handle_node_comm(int epollfd, int con, int sched_efd, int snd_efd,
 			clock_gettime(CLOCK_MONOTONIC, &start);
 #endif
 			if (msg_node->type == deploy || msg_node->type == evict) {
-				// TODO: select right bitstream
-				rc = send_binaries(con, msg_node->tsk->bin_path, &msg_node->tsk->bitstreams[0],
+				rc = send_binaries(con, msg_node->tsk->bin_path,
+								   &msg_node->tsk->bitstreams[msg_node->tsk->selected_bitstream],
 								   msg_node->type, msg_node->tsk->id);
 #ifdef TIME_NCOM
 				clock_gettime(CLOCK_MONOTONIC, &end);
