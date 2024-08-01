@@ -1,6 +1,10 @@
 #ifndef SCHED_COMMON_H
 #define SCHED_COMMON_H
 
+#include <netinet/in.h>
+#include <stdint.h>
+#include <sys/types.h>
+
 #define FRONT_SOCK	"/tmp/front.sock"
 #define MAX_EVENTS	10
 #define NODES_PORT	4217
@@ -19,6 +23,20 @@ enum mnode_type {
 	resume,
 	migrate,
 	arguments
+};
+
+enum fpga_type {
+	arria10,
+	u50,
+	u280
+};
+
+struct bitstream {
+	size_t size; // Size of bitstream in bytes
+	uint32_t frequency; // Frequency of bitstream in Hz
+	enum fpga_type fpga_type; // FPGA type the bitstream was compiled for
+	char *file_path; // Path to the bitstream file
+	char *data; // Pointer to raw bitstream data
 };
 
 /*
@@ -51,14 +69,12 @@ struct com_nod {
 	};
 };
 
-
 int setup_socket(int epollfd, struct sockaddr *saddr, uint8_t tobind);
 
 /*
- * Send binary at path `binary` and the raw bitstream pointed to by `bs` with size `bs_size` to
- * `socket`.
+ * Send binary at path `binary` and bitstream `bs` to `socket`.
  */
-ssize_t send_binaries(int socket, const char *binary, const char *bs, size_t bs_size,
+ssize_t send_binaries(int socket, const char *binary, const struct bitstream *bs,
 					  enum mnode_type msg_type, uint32_t id);
 
 ssize_t send_file(int socket, const char *filename, enum mnode_type msg_type, uint32_t id);

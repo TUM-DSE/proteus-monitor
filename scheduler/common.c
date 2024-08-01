@@ -69,8 +69,9 @@ err_set:
 	return -1;
 }
 
-ssize_t send_binaries(int socket, const char *binary, const char *bs, size_t bs_size,
-					  enum mnode_type msg_type, uint32_t id) {
+ssize_t send_binaries(int socket, const char *binary, const struct bitstream *bs,
+					  enum mnode_type msg_type, uint32_t id)
+{
 	struct stat st;
 	struct com_nod node_com = {0};
 
@@ -98,7 +99,7 @@ ssize_t send_binaries(int socket, const char *binary, const char *bs, size_t bs_
 	// sending com_nod
 	node_com.type = msg_type;
 	node_com.tsk.size = st.st_size;
-	node_com.tsk.bs_size = bs_size;
+	node_com.tsk.bs_size = bs->size;
 	node_com.tsk.id = id;
 	rc = write(socket, &node_com, sizeof(struct com_nod));
 	if (rc < sizeof(struct com_nod)) {
@@ -111,7 +112,7 @@ ssize_t send_binaries(int socket, const char *binary, const char *bs, size_t bs_
 
 	// sending a uk binary and a bitstream
 	int res1 = write_with_check(socket, bin_addr, st.st_size);
-	int res2 = write_with_check(socket, (void *)bs, bs_size);
+	int res2 = write_with_check(socket, bs->data, bs->size);
 
 	rc = munmap(bin_addr, st.st_size);
 	if (rc < 0) {

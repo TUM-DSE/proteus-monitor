@@ -64,26 +64,18 @@ enum msg_type {
 	migration
 };
 
-enum fpga_type {
-	arria10,
-	u50,
-	u280
-};
-
 struct task {
 	uint32_t id;
 	char *bin_path; 
 	char *bin_args; // Assumption: All bitstreams will have same args. 
-	char **bitstreams;
-	enum fpga_type selected_fpga; // FPGA selected by the scheduling algorithm
+	struct bitstream *bitstreams;
+	uint8_t num_bitstreams;
+	uint8_t selected_bitstream; // Index of the currently selected bitstream from `bitstreams`
 	uint8_t priority;
 	enum task_state state;
 	struct node *node;	// the node where the task has been deployed
 	struct task *next;
 	struct task *prev;
-	uint8_t num_bitstreams;
-	uint32_t *frequencies;
-	size_t *sizes;
 #ifdef TIME_TASK
 	struct timespec tstart;
 	long secs;
@@ -177,166 +169,210 @@ static char *strdup(const char *s)
 }
 
 /*
+ * Initialize `bitstream` from bitstream file at `file_path`.
+ * Returns 0 on success, 1 on error.
+ */
+static int init_bitstream(struct bitstream *bitstream, const char *file_path)
+{
+	int fd = open(file_path, O_RDONLY);
+	if (fd == -1) {
+		err_print("Failed to open bitstream file");
+		goto err;
+	}
+
+	struct stat st;
+	if (fstat(fd, &st)) {
+		err_print("Failed to fstat bitstream file");
+		goto err_close_fd;
+	}
+
+	off_t size = st.st_size;
+	if (size <= 0) {
+		err_print("Bitstream file is empty");
+		goto err_close_fd;
+	}
+
+	// Use hi_malloc from hiredis so we can free this pointer using hi_free whether it was allocated
+	// here or loaded from the database (e.g. when changing the bitstream associated with the task)
+	char *data = hi_malloc(size);
+	if (!data) {
+		err_print("Failed to malloc bitstream file");
+		goto err_close_fd;
+	}
+
+	int bytes_read = read(fd, data, size);
+	if (bytes_read == 0) {
+		err_print("Got EOF reading bitstream file");
+		goto err_free_data;
+	} else if (bytes_read < size) {
+		err_print("Short read on bitstream file");
+		goto err_free_data;
+	}
+
+	close(fd);
+
+	char *dup_file_path = strdup(file_path);
+	if (!dup_file_path) {
+		err_print("Failed to strdup file_path");
+		goto err_free_data;
+	}
+
+	bitstream->size = size;
+	bitstream->file_path = dup_file_path;
+	bitstream->data = data;
+	// TODO: parse these two from the file
+	printf("Warning: using hardcoded frequency and fpga type for bitstream %s\n", file_path);
+	bitstream->frequency = 123456789;
+	bitstream->fpga_type = u50;
+
+	return 0;
+
+err_free_data:
+	hi_free(data);
+err_close_fd:
+	close(fd);
+err:
+	fprintf(stderr, ", file: %s\n", file_path);
+	return 1;
+}
+
+/*
  * Create and initialize an entry for a new task
  */
-static struct task *create_new_task(char *path, uint8_t num_bitstreams, char *frequencies, uint8_t priority, char *args, char** bitstreams)
+static struct task *create_new_task(char *bin_path, uint8_t priority, char *args,
+									uint8_t num_bitstreams, char **bitstream_paths)
 {
-	struct task *new_task;
-
-	uint32_t frequency;
-	uint32_t *frequency_values;
-	int i;
-	char *save_ptr;
-	char *entity; // Either a path or a frequency. Reused.
-	char **entity_in_container; // Pointing to a path string.
-
-	new_task = malloc(sizeof(struct task));
+	struct task *new_task = malloc(sizeof(struct task));
 	if (!new_task) {
 		err_print("Out of memory while creating new struct task\n");
 		return NULL;
 	}
 
-	new_task->num_bitstreams = num_bitstreams;
-
-	// Allocate an array for the paths.
-	new_task->bin_path = strdup(path);
+	new_task->bin_path = strdup(bin_path);
 	if (!new_task->bin_path) {
-		free(new_task);
-		return NULL;
+		err_print("Failed to strdup bin_path\n");
+		goto err_free_task;
 	}
 
-	new_task->bitstreams = malloc(num_bitstreams * sizeof(char*));
-	for (uint8_t count = 0; count < num_bitstreams; count++) {
-		new_task->bitstreams[count] = strdup(bitstreams[count]);
+	new_task->bitstreams = malloc(num_bitstreams * sizeof(struct bitstream));
+	if (!new_task->bitstreams) {
+		err_print("Failed to malloc new_task->bitstreams\n");
+		goto err_free_bin_path;
 	}
 
-	// Allocate an array for the frequencies.
-	frequency_values = malloc(num_bitstreams * sizeof(int));
-
-	// Extract the frequencies.
-	for (i=0, entity=strtok_r(frequencies, COMMA_SEP_STR, &save_ptr);
-		 entity != NULL;
-		 entity = strtok_r(NULL, COMMA_SEP_STR, &save_ptr), i++) {
-			frequency = strtoul(entity, NULL, 0);
-			frequency_values[i] = frequency;
+	for (uint8_t i = 0; i < num_bitstreams; i++) {
+		if (init_bitstream(&new_task->bitstreams[i], bitstream_paths[i])) {
+			err_print("Failed to initialize bitstream %s\n", bitstream_paths[i]);
+			goto err_free_bitstreams;
+		}
 	}
-	new_task->frequencies = frequency_values;
 
+	// TODO: let scheduler select the right bitstream
+	printf("Warning: performance-aware scheduling not implemented yet, always using the first "
+		   "bitstream\n");
+	new_task->selected_bitstream = 0;
+
+	new_task->num_bitstreams = num_bitstreams;
+	new_task->id = 0;
 	new_task->priority = priority;
 	new_task->node = NULL;
 	new_task->state = ready;
 	new_task->next = NULL;
 	new_task->prev = NULL;
-	if (args[0]  == 0) {
+	if (args[0] == 0) {
 		new_task->bin_args = NULL;
 	} else {
 		new_task->bin_args = strdup(args);
 		if (!new_task->bin_args) {
-			free(new_task->bin_path);
-			free(new_task);
-			return NULL;
+			err_print("Failed to strdup args\n");
+			goto err_free_bitstreams;
 		}
 	}
-	new_task->sizes = malloc(num_bitstreams * sizeof(size_t));
-	new_task->selected_fpga = u50;
 #ifdef TIME_TASK
 	clock_gettime(CLOCK_MONOTONIC, &new_task->tstart);
 #endif
 
 	return new_task;
+
+err_free_bitstreams:
+	free(new_task->bitstreams);
+err_free_bin_path:
+	free(new_task->bin_path);
+err_free_task:
+	free(new_task);
+	return NULL;
+}
+
+void free_bitstreams(struct bitstream *bitstreams, uint8_t num_bitstreams)
+{
+	for (uint8_t i = 0; i < num_bitstreams; i++) {
+		free(bitstreams[i].file_path);
+		// `data` is always allocated using hi_malloc from hiredis,
+		// whether the data was loaded from disk or the database
+		hi_free(bitstreams[i].data);
+	}
+	free(bitstreams);
 }
 
 void free_task(struct task *task_to_free)
 {
-	for (uint8_t i=0; i<task_to_free->num_bitstreams; i++) free(task_to_free->bitstreams[i]);
-	
-	free(task_to_free->bin_path);
-	free(task_to_free->frequencies);
-	if (task_to_free->bin_args != NULL)
-	{
+	if (task_to_free->bin_args != NULL) {
 		free(task_to_free->bin_args);
 	}
-	free(task_to_free->sizes);
+	free_bitstreams(task_to_free->bitstreams, task_to_free->num_bitstreams);
+	free(task_to_free->bin_path);
 	free(task_to_free);
 }
 
 void print_task(struct task *task_to_print)
 {
-	printf("Task id %d with state %d, binary_path: %s, num_bitstreams: %d, priority: %hhu, args: %s, ", task_to_print->id, task_to_print->state, task_to_print->bin_path, task_to_print->num_bitstreams, task_to_print->priority, task_to_print->bin_args ? task_to_print->bin_args : "");
+	printf(
+		"Task id %d with state %d, binary_path: %s, num_bitstreams: %d, priority: %hhu, args: %s, ",
+		task_to_print->id, task_to_print->state, task_to_print->bin_path,
+		task_to_print->num_bitstreams, task_to_print->priority,
+		task_to_print->bin_args ? task_to_print->bin_args : "");
+
 	printf("frequencies: ");
-	for (uint8_t i=0; i<task_to_print->num_bitstreams; i++) printf("%d ", task_to_print->frequencies[i]);
+	for (uint8_t i=0; i<task_to_print->num_bitstreams; i++) {
+		printf("%d ", task_to_print->bitstreams[i].frequency);
+	}
+
 	printf(", bitstreams: ");
-	for (uint8_t i=0; i<task_to_print->num_bitstreams; i++) printf("%s ", task_to_print->bitstreams[i]);
+	for (uint8_t i=0; i<task_to_print->num_bitstreams; i++) {
+		printf("%s ", task_to_print->bitstreams[i].file_path);
+	}
+
 	printf("\n");
 }
 
-enum fpga_type return_fpga_type(char *bin)
-{
-	//ToDo: read binary and distinguish fpga_type (arria10, u50, etc...)
-	return u50;
-}
-
 /*
- * Save all bitstreams of task `tsk` to database and set `tsk->sizes`.
+ * Save all bitstreams of task `tsk` to database.
  */
-void save_bitstreams(struct task *tsk)
+void save_bitstreams(const struct task *tsk)
 {
-	uint8_t i = 0;
-	for (; i < tsk->num_bitstreams; i++) {
-		int fd = open(tsk->bitstreams[i], O_RDONLY);
-		if (fd == -1) {
-			err_print("Failed to open bitstream file");
-			goto err;
-		}
-
-		struct stat st;
-		if (fstat(fd, &st)) {
-			err_print("Failed to fstat bitstream file");
-			goto err;
-		}
-
-		off_t bitstream_size = st.st_size;
-		if (bitstream_size <= 0) {
-			err_print("Bitstream file is empty");
-			goto err;
-		}
-
-		tsk->sizes[i] = bitstream_size;
-
-		char *raw_bitstream = mmap(0, bitstream_size, PROT_READ, MAP_PRIVATE, fd, 0);
-		if (raw_bitstream == MAP_FAILED) {
-			err_print("Failed to mmap bitstream file");
-			goto err;
-		}
-
-		enum fpga_type type = return_fpga_type(tsk->bitstreams[i]);
+	for (uint8_t i = 0; i < tsk->num_bitstreams; i++) {
 		char key_id[32];
-		snprintf(key_id, sizeof(key_id), "%d-%d", tsk->id, type);
+		snprintf(key_id, sizeof(key_id), "%d-%d", tsk->id, tsk->bitstreams[i].fpga_type);
 
-		redisReply *reply =
-			redisCommand(connection, "SET %s %b", key_id, raw_bitstream, bitstream_size);
+		redisReply *reply = redisCommand(connection, "SET %s %b", key_id, tsk->bitstreams[i].data,
+										 tsk->bitstreams[i].size);
 		if (reply == NULL) {
-			err_print("Failed to save bitstream to redis db");
-			goto err;
+			err_print("Failed to save bitstream %s to redis db\n", tsk->bitstreams[i].file_path);
+			redisFree(connection);
+			exit(EXIT_FAILURE);
 		}
 		freeReplyObject(reply);
 	}
-
-	return;
-
-err:
-	fprintf(stderr, ", filename: %s\n", tsk->bitstreams[i]);
-	redisFree(connection);
-	exit(EXIT_FAILURE);
 }
 
 /*
  * Load bitstream of task `tsk` for fpga type `type` from database.
+ * Returns pointer to raw bitstream data.
  */
-char *load_bitstream(const struct task *tsk)
+char *load_bitstream(const struct task *tsk, enum fpga_type type)
 {
 	char key_id[32];
-	snprintf(key_id, sizeof(key_id), "%d-%d", tsk->id, tsk->selected_fpga);
+	snprintf(key_id, sizeof(key_id), "%d-%d", tsk->id, type);
 
 	redisReply *reply = redisCommand(connection, "GET %s", key_id);
 	if (reply == NULL) {
@@ -401,7 +437,6 @@ static void *get_cmd_front(void *arg)
 		uint8_t num_bitstreams = 0;
 		uint8_t prior = 2;
 		char path_bin[BIN_PATH_LEN] = {0};
-		char frequencies[FREQ_LEN] = {0}; // TODO: Use this.
 		char args[ARGS_LEN] = {0};
 
 		char* front_cmd_split = strtok(front_cmd, "|");
@@ -424,9 +459,13 @@ static void *get_cmd_front(void *arg)
 				goto exit_front;
 			}
 			path_bin_arr[i] = strdup(path_bs);
+			if (!path_bin_arr[i]) {
+				err_print("Failed to strdup path_bs\n");
+				goto exit_front;
+			}
 		}
 
-		tsk_to_add = create_new_task(path_bin, num_bitstreams, frequencies, prior, args, path_bin_arr);
+		tsk_to_add = create_new_task(path_bin, prior, args, num_bitstreams, path_bin_arr);
 		if (!tsk_to_add) {
 			err_print("Could not create new task\n");
 			goto exit_front;
@@ -718,9 +757,9 @@ static int handle_node_comm(int epollfd, int con, int sched_efd, int snd_efd,
 			clock_gettime(CLOCK_MONOTONIC, &start);
 #endif
 			if (msg_node->type == deploy || msg_node->type == evict) {
-				char *bitstream = load_bitstream(msg_node->tsk);
-				// TODO: proper msg_node->tsk->sizes
-				rc = send_binaries(con, msg_node->tsk->bin_path, bitstream, msg_node->tsk->sizes[0], msg_node->type, msg_node->tsk->id);
+				// TODO: select right bitstream
+				rc = send_binaries(con, msg_node->tsk->bin_path, &msg_node->tsk->bitstreams[0],
+								   msg_node->type, msg_node->tsk->id);
 #ifdef TIME_NCOM
 				clock_gettime(CLOCK_MONOTONIC, &end);
 				printf("Sending command and binary took %ld ms\n",
