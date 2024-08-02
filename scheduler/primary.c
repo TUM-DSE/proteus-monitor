@@ -267,12 +267,8 @@ static struct task *create_new_task(char *bin_path, uint8_t priority, char *args
 		}
 	}
 
-	// TODO: let scheduler select the right bitstream
-	printf("Warning: performance-aware scheduling not implemented yet, always using the first "
-		   "bitstream\n");
-	new_task->selected_bitstream = 0;
-
 	new_task->num_bitstreams = num_bitstreams;
+	new_task->selected_bitstream = 0;
 	new_task->id = 0;
 	new_task->priority = priority;
 	new_task->node = NULL;
@@ -394,6 +390,29 @@ err_free_reply:
 err:
 	redisFree(connection);
 	exit(EXIT_FAILURE);
+}
+
+/*
+ * Switch the bitstream for `task` to the one compiled for FPGA type `fpga_type`.
+ * The corresponding bitstream has to be part of `task->bitstreams` already.
+ * Returns 0 on success, 1 on error.
+ */
+int switch_bitstream(struct task *task, enum fpga_type fpga_type)
+{
+	uint8_t i = 0;
+	for (; i < task->num_bitstreams; i++) {
+		if (task->bitstreams[i].fpga_type == fpga_type) {
+			task->selected_bitstream = i;
+			break;
+		}
+	}
+
+	if (i == task->num_bitstreams) {
+		err_print("No bitstream found for fpga type %d\n", fpga_type);
+		return 1;
+	}
+
+	return 0;
 }
 
 /*
@@ -1200,6 +1219,15 @@ static void scheduler_algorithm(struct node *nhead, struct task *thead,
 	*pick_t = tsk_avail;
 	if (!tsk_avail)
 		return;
+
+	// TODO: let scheduler select the right bitstream
+	printf("Warning: performance-aware scheduling not implemented yet, always using the first "
+		   "bitstream\n");
+	// if (switch_bitstream(*pick_t, u50)) {
+	// 	err_print("Failed to switch bitstream\n");
+	// 	return;
+	// }
+
 	if (node_avail)
 		return;
 	if (tsk_avail->priority == 0 && node_prior != NULL)
