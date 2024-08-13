@@ -672,7 +672,8 @@ static ssize_t send_bin_args(int soc, const char *args)
 
 	node_com.type = arguments;
 	if (args != NULL)
-		node_com.args_size = strlen(args);
+		// strlen returns length excluding terminating null byte
+		node_com.args_size = strlen(args) + 1;
 	else
 		node_com.args_size = 0;
 	rc = write(soc, &node_com, sizeof(struct com_nod));
