@@ -287,9 +287,6 @@ namespace funky_backend {
           case 1:
             m_fpga_context = new funky_backend::XoclContext(UKVM_CHECKED_GPA_P(thr_info.hv, thr_info.wr_queue, thr_info.wr_queue_len), UKVM_CHECKED_GPA_P(thr_info.hv, thr_info.rd_queue, thr_info.rd_queue_len));
             break;
-          case 2:
-            m_fpga_context = new funky_backend::CoyoteContext(UKVM_CHECKED_GPA_P(thr_info.hv, thr_info.wr_queue, thr_info.wr_queue_len), UKVM_CHECKED_GPA_P(thr_info.hv, thr_info.rd_queue, thr_info.rd_queue_len));
-            break;
           default:
             std::cout << "Error: Invalid vendor number\n";
             exit(EXIT_FAILURE);
