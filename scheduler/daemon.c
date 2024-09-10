@@ -51,7 +51,7 @@ static uint64_t write_file_n(uint8_t *buf, off_t size, char *file)
 	size_t n;
 	static uint64_t ref = 0;
 
-	fd = open(file, O_WRONLY | O_CREAT, S_IRUSR | S_IWUSR);
+	fd = open(file, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
 	if (fd < 0) {
 		perror("Creating new file");
 		return -1;
