@@ -259,36 +259,16 @@ namespace funky_backend {
           //    )), 
           m_save_data(0), msg_read_queue(wq_addr), msg_write_queue(rq_addr)
       {
-        // ToDo: Distingish fpga vendor with a smarter way. UKVM should know fpga vendor in advance.
-        
-        // while(1) {
-        //   auto devices = xcl::get_intel_devices();
-        //   std::cout << "this is unko" << std::endl;
-        //   if(devices.size() == 0) {
-        //     devices = xcl::get_xil_devices();
-        //     if(devices.size() == 0) {
-        //       fpga_vendor = 2; // Coyote
-        //       break;
-        //     }
-        //     fpga_vendor = 1; // Xilinx
-        //     break;
-        //   }
-        //   break;
-        // }
-
-        // Hardcode for now
-        uint8_t fpga_vendor = 1; // Xilinx
-        auto devices = xcl::get_xil_devices();
-
-        switch(fpga_vendor) {
-          case 0: 
+        switch(thr_info.fpga_type) {
+          case FPGA_TYPE_ARRIA10:
             m_fpga_context = new funky_backend::AoclContext(UKVM_CHECKED_GPA_P(thr_info.hv, thr_info.wr_queue, thr_info.wr_queue_len), UKVM_CHECKED_GPA_P(thr_info.hv, thr_info.rd_queue, thr_info.rd_queue_len));
             break;
-          case 1:
+          case FPGA_TYPE_U50:
+          case FPGA_TYPE_U280:
             m_fpga_context = new funky_backend::XoclContext(UKVM_CHECKED_GPA_P(thr_info.hv, thr_info.wr_queue, thr_info.wr_queue_len), UKVM_CHECKED_GPA_P(thr_info.hv, thr_info.rd_queue, thr_info.rd_queue_len));
             break;
           default:
-            std::cout << "Error: Invalid vendor number\n";
+            std::cerr << "Error: Invalid fpga type: " << thr_info.fpga_type << "\n";
             exit(EXIT_FAILURE);
         }
       }

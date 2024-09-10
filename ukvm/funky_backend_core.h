@@ -12,16 +12,28 @@ extern "C" {
 
 #include<stddef.h>
 #include<stdint.h>
+#include <limits.h>
 
 #include "ukvm.h"
 #include "funky_debug_c.h"
+
+// Keep in sync with ../scheduler/common.h
+enum fpga_type {
+  FPGA_TYPE_ARRIA10,
+  FPGA_TYPE_U50,
+  FPGA_TYPE_U280,
+  FPGA_TYPE_UNSUPPORTED = INT_MAX,
+};
 
 /* multi-threading */
 struct fpga_thr_info
 {
   struct ukvm_hv *hv;
+
+  enum fpga_type fpga_type;
   uint64_t bs;
   size_t bs_len;
+
   uint64_t wr_queue;
   size_t wr_queue_len;
   uint64_t rd_queue;
@@ -58,6 +70,8 @@ struct fpga_data_header {
 };
 
 #define MSG_QUEUE_MAX_CAPACITY 8
+
+enum fpga_type fpga_type_from_str(char *str);
 
 // struct thr_msg* recv_msg_from_worker(void);
 int recv_msg_from_worker(struct thr_msg* msg);

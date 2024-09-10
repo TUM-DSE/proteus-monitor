@@ -34,6 +34,18 @@
 /* Xocl backend context class to save temp data & communicate with xocl lib */
 std::unique_ptr<funky_backend::ClContext> bk_context;
 
+enum fpga_type fpga_type_from_str(char *str)
+{
+  if (strcmp(str, "arria10") == 0)
+    return FPGA_TYPE_ARRIA10;
+  else if (strcmp(str, "u50") == 0)
+    return FPGA_TYPE_U50;
+  else if (strcmp(str, "u280") == 0)
+    return FPGA_TYPE_U280;
+
+  return FPGA_TYPE_UNSUPPORTED;
+}
+
 int allocate_fpga(void* wr_queue_addr, void* rd_queue_addr) {
   if(bk_context != nullptr) {
     std::cout << "Warning: xocl context already exists." << std::endl;

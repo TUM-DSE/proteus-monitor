@@ -38,9 +38,7 @@
 
 #include "funky_backend_core.h"
 
-// static struct ukvm_fpgainfo fpgainfo;
-static char *fpganame;
-// static int fpgafd;
+static enum fpga_type fpga_type;
 
 static void hypercall_fpgainfo(struct ukvm_hv *hv, ukvm_gpa_t gpa)
 {
@@ -116,8 +114,11 @@ static void hypercall_fpgainit(struct ukvm_hv *hv, ukvm_gpa_t gpa)
       reconfigure_fpga(bitstream, fpga->bs_len);
 
 #else
+    printf("fpga_init: fpga_type = %d\n", fpga_type);
+
     struct fpga_thr_info thr_info = {
-      hv, 
+      hv,
+      fpga_type,
       fpga->bs,
       fpga->bs_len, 
       fpga->wr_queue,
@@ -167,9 +168,16 @@ static void hypercall_fpgareq(struct ukvm_hv *hv, ukvm_gpa_t gpa)
 
 static int handle_cmdarg(char *cmdarg)
 {
-    if (strncmp("--fpga=", cmdarg, 7))
+    char fpga_name[30];
+    if (sscanf(cmdarg, "--fpga=%s", fpga_name) != 1) {
         return -1;
-    fpganame = cmdarg + 7;
+    }
+
+    fpga_type = fpga_type_from_str(fpga_name);
+    printf("handle_cmdarg: set fpga_type to %d\n", fpga_type);
+    if (fpga_type == FPGA_TYPE_UNSUPPORTED) {
+        return -1;
+    }
 
     return 0;
 }
@@ -196,7 +204,7 @@ static int setup(struct ukvm_hv *hv)
 
 static char *usage(void)
 {
-    return "--fpga=FPGA (virt FPGA name exposed to the unikernel)";
+    return "--fpga=<fpga> FPGA model (arria10, u50, or u280)";
 }
 
 struct ukvm_module ukvm_module_fpga = {
