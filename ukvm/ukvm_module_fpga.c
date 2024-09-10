@@ -114,8 +114,6 @@ static void hypercall_fpgainit(struct ukvm_hv *hv, ukvm_gpa_t gpa)
       reconfigure_fpga(bitstream, fpga->bs_len);
 
 #else
-    printf("fpga_init: fpga_type = %d\n", fpga_type);
-
     struct fpga_thr_info thr_info = {
       hv,
       fpga_type,
@@ -174,7 +172,6 @@ static int handle_cmdarg(char *cmdarg)
     }
 
     fpga_type = fpga_type_from_str(fpga_name);
-    printf("handle_cmdarg: set fpga_type to %d\n", fpga_type);
     if (fpga_type == FPGA_TYPE_UNSUPPORTED) {
         return -1;
     }
