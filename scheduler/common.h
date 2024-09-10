@@ -25,11 +25,43 @@ enum mnode_type {
 	arguments
 };
 
+/*
+ * The state of a task. For the time being
+ * only the first 2 states are used.
+ */
+enum task_state {
+	ready = 0,
+	running,
+	stopped,
+	done
+};
+
+struct task {
+	uint32_t id;
+	char *bin_path;
+	char *bin_args; // Assumption: All bitstreams will have same args.
+	struct bitstream *bitstreams;
+	uint8_t num_bitstreams;
+	uint8_t selected_bitstream; // Index of the currently selected bitstream from `bitstreams`
+	uint8_t priority;
+	enum task_state state;
+	struct node *node;	// the node where the task has been deployed
+	struct task *next;
+	struct task *prev;
+#ifdef TIME_TASK
+	struct timespec tstart;
+	long secs;
+	long nsecs;
+#endif
+};
+
 enum fpga_type {
 	arria10,
 	u50,
 	u280
 };
+
+static char *fpga_type_str[] = {"arria10", "u50", "u280"};
 
 struct bitstream {
 	size_t size; // Size of bitstream in bytes
@@ -53,6 +85,7 @@ struct tsk_dpl {
 	off_t size;
 	off_t bs_size;
 	uint32_t id;
+	enum fpga_type fpga_type;
 };
 
 /*
@@ -72,10 +105,9 @@ struct com_nod {
 int setup_socket(int epollfd, struct sockaddr *saddr, uint8_t tobind);
 
 /*
- * Send binary at path `binary` and bitstream `bs` to `socket`.
+ * Send message of type `msg_type` containing binary and bitstream of `task` to `socket`.
  */
-ssize_t send_binaries(int socket, const char *binary, const struct bitstream *bs,
-					  enum mnode_type msg_type, uint32_t id);
+ssize_t send_binaries(int socket, enum mnode_type msg_type, const struct task *task);
 
 ssize_t send_file(int socket, const char *filename, enum mnode_type msg_type, uint32_t id);
 

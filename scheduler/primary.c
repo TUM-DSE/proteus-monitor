@@ -33,17 +33,6 @@ redisContext *connection = NULL;
 //#define TIME_ALGO 1
 
 /*
- * The state of a task. For the time being
- * only the first 2 states are used.
- */
-enum task_state {
-	ready = 0,
-	running,
-	stopped,
-	done
-};
-
-/*
  * The state of a node. If a node goes down then it gets removed
  * from node list.
  */
@@ -62,25 +51,6 @@ enum msg_type {
 	node_ret,	// A node reported back the sult of a task execution
 	node_down,
 	migration
-};
-
-struct task {
-	uint32_t id;
-	char *bin_path; 
-	char *bin_args; // Assumption: All bitstreams will have same args. 
-	struct bitstream *bitstreams;
-	uint8_t num_bitstreams;
-	uint8_t selected_bitstream; // Index of the currently selected bitstream from `bitstreams`
-	uint8_t priority;
-	enum task_state state;
-	struct node *node;	// the node where the task has been deployed
-	struct task *next;
-	struct task *prev;
-#ifdef TIME_TASK
-	struct timespec tstart;
-	long secs;
-	long nsecs;
-#endif
 };
 
 struct node {
@@ -221,9 +191,10 @@ static int init_bitstream(struct bitstream *bitstream, const char *file_path)
 	bitstream->file_path = dup_file_path;
 	bitstream->data = data;
 	// TODO: parse these two from the file
-	printf("Warning: using hardcoded frequency and fpga type for bitstream %s\n", file_path);
 	bitstream->frequency = 123456789;
 	bitstream->fpga_type = u50;
+	printf("Warning: using hardcoded frequency %u and fpga type %s for bitstream %s\n",
+		   bitstream->frequency, fpga_type_str[bitstream->fpga_type], file_path);
 
 	return 0;
 
@@ -777,9 +748,7 @@ static int handle_node_comm(int epollfd, int con, int sched_efd, int snd_efd,
 			clock_gettime(CLOCK_MONOTONIC, &start);
 #endif
 			if (msg_node->type == deploy || msg_node->type == evict) {
-				rc = send_binaries(con, msg_node->tsk->bin_path,
-								   &msg_node->tsk->bitstreams[msg_node->tsk->selected_bitstream],
-								   msg_node->type, msg_node->tsk->id);
+				rc = send_binaries(con, msg_node->type, msg_node->tsk);
 #ifdef TIME_NCOM
 				clock_gettime(CLOCK_MONOTONIC, &end);
 				printf("Sending command and binary took %ld ms\n",

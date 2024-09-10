@@ -69,14 +69,13 @@ err_set:
 	return -1;
 }
 
-ssize_t send_binaries(int socket, const char *binary, const struct bitstream *bs,
-					  enum mnode_type msg_type, uint32_t id)
+ssize_t send_binaries(int socket, enum mnode_type msg_type, const struct task *task)
 {
 	struct stat st;
 	struct com_nod node_com = {0};
 
 	// mapping binary
-	int fd = open(binary, O_RDONLY);
+	int fd = open(task->bin_path, O_RDONLY);
 	if (fd < 0) {
 		perror("Opening binary file to send");
 		return -1;
@@ -96,11 +95,14 @@ ssize_t send_binaries(int socket, const char *binary, const struct bitstream *bs
 
 	close(fd);
 
+	struct bitstream *bs = &task->bitstreams[task->selected_bitstream];
+
 	// sending com_nod
 	node_com.type = msg_type;
 	node_com.tsk.size = st.st_size;
 	node_com.tsk.bs_size = bs->size;
-	node_com.tsk.id = id;
+	node_com.tsk.id = task->id;
+	node_com.tsk.fpga_type = bs->fpga_type;
 	rc = write(socket, &node_com, sizeof(struct com_nod));
 	if (rc < sizeof(struct com_nod)) {
 		if (rc < 0)

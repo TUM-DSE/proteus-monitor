@@ -38,6 +38,7 @@ struct ukvm_ps {
 	char bitstream[30];
 	char net[30];
 	char mig_file[30];
+	char fpga[30];
 };
 
 /*
@@ -169,8 +170,8 @@ static void transmit_mig_file(int id)
  * a migrated guest.
  */
 static int start_guest(const char *mig_arg, const char *guest_bin,
-			const char *net_arg, const char *mon_arg,
-			const char *args)
+					   const char *net_arg, const char *mon_arg,
+					   const char *fpga_arg, const char *args)
 {
 	int pid;
 
@@ -213,10 +214,10 @@ static int start_guest(const char *mig_arg, const char *guest_bin,
 		}
 		if (mig_arg)
 			execl(ukvm_bin, ukvm_bin, mem_arg, net_arg, disk_arg,
-				mig_arg, mon_arg, guest_bin, (char *)NULL);
+				mig_arg, mon_arg, fpga_arg, guest_bin, (char *)NULL);
 		else
 			execl(ukvm_bin, ukvm_bin, mem_arg, net_arg, disk_arg,
-				mon_arg, guest_bin, args, (char *)NULL);
+				mon_arg, fpga_arg, guest_bin, args, (char *)NULL);
 	} else if (pid == -1) {
 		perror("fork");
 		return -1;
@@ -338,6 +339,7 @@ static struct ukvm_ps *msg_from_primary(int socket, int *ret)
 		sprintf(ps_ukvm->binary, "/tmp/binary_0.ukvm");
 		sprintf(ps_ukvm->socket, "--mon=/tmp/ukvm0.sock");
 		sprintf(ps_ukvm->bitstream, "/tmp/bitstream_0.ukvm");
+		sprintf(ps_ukvm->fpga, "--fpga=%s", fpga_type_str[node_com.tsk.fpga_type]);
 		ps_ukvm->id = node_com.tsk.id;
 		rc = write_file_n(buf_binary, node_com.tsk.size, ps_ukvm->binary);
 		free(buf_binary);
@@ -355,7 +357,7 @@ static struct ukvm_ps *msg_from_primary(int socket, int *ret)
 			goto ret_1;
 		// start new task
 		ps_ukvm->pid = start_guest(NULL, ps_ukvm->binary, "--net=tap0",
-					   ps_ukvm->socket, args);
+					   ps_ukvm->socket, ps_ukvm->fpga, args);
 		if (ps_ukvm->pid < 0)
 			goto ret_1;
 		printf("Started ukvm guest with pid %d\n", ps_ukvm->pid);
@@ -376,6 +378,7 @@ static struct ukvm_ps *msg_from_primary(int socket, int *ret)
 		sprintf(ps_ukvm->binary, "/tmp/binary_1.ukvm");
 		sprintf(ps_ukvm->socket, "--mon=/tmp/ukvm1.sock");
 		sprintf(ps_ukvm->bitstream, "/tmp/bitstream_1.ukvm");
+		sprintf(ps_ukvm->fpga, "--fpga=%s", fpga_type_str[node_com.tsk.fpga_type]);
 		ps_ukvm->id = node_com.tsk.id;
 		rc = write_file_n(buf_binary, node_com.tsk.size, ps_ukvm->binary);
 		free(buf_binary);
@@ -396,7 +399,7 @@ static struct ukvm_ps *msg_from_primary(int socket, int *ret)
 			goto ret_1;
 		// start new task
 		ps_ukvm->pid = start_guest(NULL, ps_ukvm->binary, "--net=tap1",
-					   ps_ukvm->socket, args);
+					   ps_ukvm->socket, ps_ukvm->fpga, args);
 		if (ps_ukvm->pid < 0)
 			goto ret_1;
 		printf("Started ukvm guest with pid %d\n", ps_ukvm->pid);
@@ -504,6 +507,10 @@ static struct ukvm_ps *rcv_start_migrated_guest(int server_soc)
 	sprintf(ps_ukvm->mig_file, "--load=/tmp/file.mig");
 	sprintf(ps_ukvm->socket, "--mon=/tmp/ukvm1.sock");
 	sprintf(ps_ukvm->net, "--net=tap0");
+	// TODO: Set the right FPGA type
+	err_print("Warning: using u50 as hardcoded fpga type for migrated guest\n");
+	sprintf(ps_ukvm->fpga, "--fpga=u50");
+
 	/*
 	 * The first file is the binary
 	 * The second file is the migration file
@@ -521,7 +528,7 @@ static struct ukvm_ps *rcv_start_migrated_guest(int server_soc)
 	 * Start the migrated guest.
 	 */
 	ps_ukvm->pid = start_guest(ps_ukvm->mig_file, ps_ukvm->binary, ps_ukvm->net,
-				ps_ukvm->socket, NULL);
+				ps_ukvm->socket, ps_ukvm->fpga, NULL);
 	if (ps_ukvm->pid < 0)
 		goto err_out;
 	printf("Started ukvm guest with pid %d\n", ps_ukvm->pid);
