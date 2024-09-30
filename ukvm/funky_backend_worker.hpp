@@ -15,6 +15,10 @@
 #include <cstdlib>
 #include <algorithm>
 
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
+
 // #include "timer.h" // for evaluation
 
 // TIMER_INIT(3)
@@ -281,10 +285,33 @@ namespace funky_backend {
       /* Reconfigure FPGA */
       void reconfigure_fpga()
       {
-        //void* bitstream = UKVM_CHECKED_GPA_P(m_thr_info.hv, m_thr_info.bs, m_thr_info.bs_len);
-        void* bitstream = (void*) m_thr_info.bs;
+        // The bitstream received from the guest in `hypercall_fpgainit` is ignored in favor of
+        // the bitstream put here by the scheduler.
+        std::cout << "UKVM: using bitstream /tmp/bitstream_0.ukvm\n";
+        int fd = open("/tmp/bitstream_0.ukvm", O_RDONLY);
+        if (fd < 0) {
+          perror("Opening file");
+          exit(EXIT_FAILURE);
+        }
 
-        auto ret = m_fpga_context->reconfigure_fpga(bitstream, m_thr_info.bs_len);
+        struct stat st;
+        int rc = fstat(fd, &st);
+        if (rc < 0) {
+          perror("Getting file size");
+          exit(EXIT_FAILURE);
+        }
+        m_thr_info.bs_len = st.st_size;
+
+        void* buf = mmap(NULL, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0); // todo: munmap?
+        if (buf == MAP_FAILED) {
+          perror("mmap failed\n");
+          exit(EXIT_FAILURE);
+        }
+        m_thr_info.bs = (uint64_t) buf;
+
+        close(fd);
+
+        auto ret = m_fpga_context->reconfigure_fpga((void*) m_thr_info.bs, m_thr_info.bs_len);
         if(ret != CL_SUCCESS)
         {
           std::cout << "UKVM: failed to program device. \n";
