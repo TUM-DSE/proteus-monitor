@@ -1,0 +1,7 @@
+application, platform, number
+vadd, U50-HBM, 446
+vadd, U280-HBM, 425
+vadd, U280-DDR, 484
+stream_io, U50-HBM, 435
+stream_io, U280-HBM, 426
+stream_io, U280-DDR, 373

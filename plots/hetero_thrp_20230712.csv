@@ -1,0 +1,7 @@
+application, platform, number
+vadd, U50-HBM, 554.4441
+vadd, U280-HBM, 493.4758
+vadd, U280-DDR, 455.2151
+stream_io, U50-HBM, 1324.6793
+stream_io, U280-HBM, 1290.478
+stream_io, U280-DDR, 1052.2753
