@@ -37,9 +37,9 @@ void ukvm_x86_mem_size(size_t *mem_size) {
     assert (mem <= *mem_size);
     if (mem < *mem_size)
         warnx("adjusting memory to %zu bytes", mem);
-    if (mem > X86_GUEST_PAGE_SIZE * 512)
-        err(1, "guest memory size %zu bytes exceeds the max size %u bytes",
-            mem, X86_GUEST_PAGE_SIZE * 512);
+    if (mem > X86_GUEST_MAX_MEM_SIZE)
+        err(1, "guest memory size %zu bytes exceeds the max size %zu bytes",
+            mem, X86_GUEST_MAX_MEM_SIZE);
     *mem_size = mem;
 }
 
@@ -51,12 +51,12 @@ void ukvm_x86_setup_pagetables(uint8_t *mem, size_t mem_size)
     uint64_t paddr;
 
     /*
-     * For simplicity we currently use 2MB pages and only a single
-     * PML4/PDPTE/PDE.  Sanity check that the guest size is a multiple of the
-     * page size and will fit in a single PDE (512 entries).
+     * We use 2MB pages, 1 PML4, and 4 PDPTE, each pointing to 512 PDE for a
+     * total of 4GB. Sanity check that the guest size is a multiple of the page
+     * size and will fit in 4GB.
      */
     assert((mem_size & (X86_GUEST_PAGE_SIZE - 1)) == 0);
-    assert(mem_size <= (X86_GUEST_PAGE_SIZE * 512));
+    assert(mem_size <= X86_GUEST_MAX_MEM_SIZE);
 
     memset(pml4, 0, X86_PML4_SIZE);
     memset(pdpte, 0, X86_PDPTE_SIZE);
@@ -64,6 +64,9 @@ void ukvm_x86_setup_pagetables(uint8_t *mem, size_t mem_size)
 
     *pml4 = X86_PDPTE_BASE | (X86_PDPT_P | X86_PDPT_RW);
     *pdpte = X86_PDE_BASE | (X86_PDPT_P | X86_PDPT_RW);
+    pdpte[1] = (X86_PDE_BASE + 0x1000) | (X86_PDPT_P | X86_PDPT_RW);
+    pdpte[2] = (X86_PDE_BASE + 0x2000) | (X86_PDPT_P | X86_PDPT_RW);
+    pdpte[3] = (X86_PDE_BASE + 0x3000) | (X86_PDPT_P | X86_PDPT_RW);
     for (paddr = 0; paddr < mem_size; paddr += X86_GUEST_PAGE_SIZE, pde++)
         *pde = paddr | (X86_PDPT_P | X86_PDPT_RW | X86_PDPT_PS);
 }
