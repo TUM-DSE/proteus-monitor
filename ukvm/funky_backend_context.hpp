@@ -9,6 +9,7 @@
 #include "backend/buffer.hpp"
 #include "backend/funky_msg.hpp"
 #include "funky_debug.h"
+#include "funky_backend_core.h"
 
 #include "ukvm.h" // UKVM_CHECKED_GPA_P()
 
@@ -767,19 +768,40 @@ namespace funky_backend {
 
   class XoclContext : public AXClContext {
     public:
-      XoclContext(void* wr_queue_addr, void* rd_queue_addr) : AXClContext(wr_queue_addr, rd_queue_addr) {
+      XoclContext(void* wr_queue_addr, void* rd_queue_addr, enum fpga_type fpga_type) : AXClContext(wr_queue_addr, rd_queue_addr) {
         cl_int err;
 
-        // TODO: assign as many devices to the guest as requested  
-        //       Currently, only one device (devices[0]) is assigned to the guest.
         auto devices = xcl::get_xil_devices();
         if(devices.size() == 0) {
           std::cout << "Error: no xilinx device is found.\n";
           exit(EXIT_FAILURE);
         }
 
-        // auto device = devices[0];
-        device = devices[0];
+        std::string required_name;
+        if (fpga_type == FPGA_TYPE_U50)
+          required_name = "xilinx_u50_gen3x16_xdma_base_5";
+        else if (fpga_type == FPGA_TYPE_U280)
+          required_name = "xilinx_u280_gen3x16_xdma_base_1";
+        else {
+          std::cerr << "Unsupported FPGA type in XoclContext: " << fpga_type << "\n";
+          exit(EXIT_FAILURE);
+        }
+
+        std::string device_name;
+        size_t i = 0;
+        for (; i < devices.size(); i++) {
+          devices[i].getInfo(CL_DEVICE_NAME, &device_name);
+          if (device_name == required_name) {
+            DEBUG_STREAM("Found device " << required_name);
+            device = devices[i];
+            break;
+          }
+        }
+
+        if (i == devices.size()) {
+          std::cerr << "Failed to find device " << required_name << "\n";
+          exit(EXIT_FAILURE);
+        }
 
         // TODO: command queue option depends on the guest, so it shouldn't be created in advance?
         // Creating Context and Command Queue for selected Device
@@ -794,15 +816,11 @@ namespace funky_backend {
 
       int reconfigure_fpga(void* bin, size_t bin_size) {
         cl_int err = CL_SUCCESS;
-
         cl::Program::Binaries bins{{bin, bin_size}};
 
-        auto devices = xcl::get_xil_devices();
-        std::vector <cl::Device> p_devices = {devices[0]};
-
+        std::vector<cl::Device> p_devices = {device};
         /* program bistream to the device (FPGA) */
         program = std::make_unique<cl::Program>(context, p_devices, bins, nullptr, &err);
-        //program.get()->build();
 
         return err;
       }

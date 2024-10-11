@@ -269,7 +269,10 @@ namespace funky_backend {
             break;
           case FPGA_TYPE_U50:
           case FPGA_TYPE_U280:
-            m_fpga_context = new funky_backend::XoclContext(UKVM_CHECKED_GPA_P(thr_info.hv, thr_info.wr_queue, thr_info.wr_queue_len), UKVM_CHECKED_GPA_P(thr_info.hv, thr_info.rd_queue, thr_info.rd_queue_len));
+            m_fpga_context = new funky_backend::XoclContext(
+              UKVM_CHECKED_GPA_P(thr_info.hv, thr_info.wr_queue, thr_info.wr_queue_len),
+              UKVM_CHECKED_GPA_P(thr_info.hv, thr_info.rd_queue, thr_info.rd_queue_len),
+              thr_info.fpga_type);
             break;
           default:
             std::cerr << "Error: Invalid fpga type: " << thr_info.fpga_type << "\n";

@@ -82,7 +82,7 @@ static void hypercall_fpgainit(struct ukvm_hv *hv, ukvm_gpa_t gpa)
     void* rd_queue_addr = UKVM_CHECKED_GPA_P(hv, fpga->rd_queue, fpga->rd_queue_len);
 
     if(wr_queue_addr && rd_queue_addr)
-      allocate_fpga(wr_queue_addr, rd_queue_addr);
+      allocate_fpga(wr_queue_addr, rd_queue_addr, fpga_type);
 
     if(bitstream)
       reconfigure_fpga(bitstream, fpga->bs_len);

@@ -1,6 +1,6 @@
 #include "funky_backend_core.h"
 
-int allocate_fpga(void* wr_queue_addr, void* rd_queue_addr) 
+int allocate_fpga(void* wr_queue_addr, void* rd_queue_addr, enum fpga_type fpga_type)
 {
   return 0;
 }

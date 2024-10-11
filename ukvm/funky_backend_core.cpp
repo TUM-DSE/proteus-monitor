@@ -46,13 +46,13 @@ enum fpga_type fpga_type_from_str(char *str)
   return FPGA_TYPE_UNSUPPORTED;
 }
 
-int allocate_fpga(void* wr_queue_addr, void* rd_queue_addr) {
+int allocate_fpga(void* wr_queue_addr, void* rd_queue_addr, enum fpga_type fpga_type) {
   if(bk_context != nullptr) {
     std::cout << "Warning: xocl context already exists." << std::endl;
     return -1;
   }
 
-  bk_context = std::make_unique<funky_backend::XoclContext>(wr_queue_addr, rd_queue_addr);
+  bk_context = std::make_unique<funky_backend::XoclContext>(wr_queue_addr, rd_queue_addr, fpga_type);
   //std::cout << "DISABLE_FPGA_THR is on." << std::endl;
   return 0;
 }
