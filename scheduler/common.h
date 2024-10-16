@@ -58,10 +58,11 @@ struct task {
 enum fpga_type {
 	arria10,
 	u50,
-	u280
+	u280,
+	fpga_type_unsupported
 };
 
-static char *fpga_type_str[] = {"arria10", "u50", "u280"};
+static const char *fpga_type_to_str[] = {"arria10", "u50", "u280", "unsupported"};
 
 struct bitstream {
 	size_t size; // Size of bitstream in bytes

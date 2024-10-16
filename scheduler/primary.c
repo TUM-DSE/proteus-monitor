@@ -194,7 +194,7 @@ static int init_bitstream(struct bitstream *bitstream, const char *file_path)
 	bitstream->frequency = 123456789;
 	bitstream->fpga_type = u50;
 	printf("Warning: using hardcoded frequency %u and fpga type %s for bitstream %s\n",
-		   bitstream->frequency, fpga_type_str[bitstream->fpga_type], file_path);
+		   bitstream->frequency, fpga_type_to_str[bitstream->fpga_type], file_path);
 
 	return 0;
 

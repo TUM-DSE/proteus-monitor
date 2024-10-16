@@ -339,7 +339,7 @@ static struct ukvm_ps *msg_from_primary(int socket, int *ret)
 		sprintf(ps_ukvm->binary, "/tmp/binary_0.ukvm");
 		sprintf(ps_ukvm->socket, "--mon=/tmp/ukvm0.sock");
 		sprintf(ps_ukvm->bitstream, "/tmp/bitstream_0.ukvm");
-		sprintf(ps_ukvm->fpga, "--fpga=%s", fpga_type_str[node_com.tsk.fpga_type]);
+		sprintf(ps_ukvm->fpga, "--fpga=%s", fpga_type_to_str[node_com.tsk.fpga_type]);
 		ps_ukvm->id = node_com.tsk.id;
 		rc = write_file_n(buf_binary, node_com.tsk.size, ps_ukvm->binary);
 		free(buf_binary);
@@ -378,7 +378,7 @@ static struct ukvm_ps *msg_from_primary(int socket, int *ret)
 		sprintf(ps_ukvm->binary, "/tmp/binary_1.ukvm");
 		sprintf(ps_ukvm->socket, "--mon=/tmp/ukvm1.sock");
 		sprintf(ps_ukvm->bitstream, "/tmp/bitstream_1.ukvm");
-		sprintf(ps_ukvm->fpga, "--fpga=%s", fpga_type_str[node_com.tsk.fpga_type]);
+		sprintf(ps_ukvm->fpga, "--fpga=%s", fpga_type_to_str[node_com.tsk.fpga_type]);
 		ps_ukvm->id = node_com.tsk.id;
 		rc = write_file_n(buf_binary, node_com.tsk.size, ps_ukvm->binary);
 		free(buf_binary);
