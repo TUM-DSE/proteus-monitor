@@ -22,7 +22,7 @@ enum fpga_type {
   FPGA_TYPE_ARRIA10,
   FPGA_TYPE_U50,
   FPGA_TYPE_U280,
-  FPGA_TYPE_UNSUPPORTED = INT_MAX,
+  FPGA_TYPE_UNSUPPORTED,
 };
 
 /* multi-threading */
@@ -47,6 +47,11 @@ void create_fpga_worker(struct fpga_thr_info thr_info);
 void destroy_fpga_worker(void);
 int is_fpga_worker_alive(void);
 
+/* Get the FPGA type that was set using the --fpga option.
+ *
+ * Returns 0 on success, -1 if the FPGA type has not been set.
+ */
+int get_fpga_type(enum fpga_type *fpga_type);
 
 /* inter-thread communication via msg queue */
 enum ThrMsgType {

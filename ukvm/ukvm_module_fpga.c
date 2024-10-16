@@ -35,10 +35,15 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <sys/mman.h>
+#include <stdbool.h>
 
+#include "funky_debug_c.h"
 #include "funky_backend_core.h"
 
-static enum fpga_type fpga_type;
+static enum fpga_type FPGA_TYPE = FPGA_TYPE_UNSUPPORTED;
+static bool FPGA_TYPE_SET = false;
+
+const char *fpga_type_to_str[] = {"arria10", "u50", "u280", "unsupported"};
 
 static void hypercall_fpgainfo(struct ukvm_hv *hv, ukvm_gpa_t gpa)
 {
@@ -88,9 +93,14 @@ static void hypercall_fpgainit(struct ukvm_hv *hv, ukvm_gpa_t gpa)
       reconfigure_fpga(bitstream, fpga->bs_len);
 
 #else
+    if (!FPGA_TYPE_SET)
+        errx(EXIT_FAILURE, "FPGA type has not been set with the --fpga option");
+    else if (FPGA_TYPE == FPGA_TYPE_UNSUPPORTED)
+        errx(EXIT_FAILURE, "Unsupported FPGA type");
+
     struct fpga_thr_info thr_info = {
       hv,
-      fpga_type,
+      FPGA_TYPE,
       fpga->bs,
       fpga->bs_len, 
       fpga->wr_queue,
@@ -141,13 +151,15 @@ static void hypercall_fpgareq(struct ukvm_hv *hv, ukvm_gpa_t gpa)
 static int handle_cmdarg(char *cmdarg)
 {
     char fpga_name[30];
-    if (sscanf(cmdarg, "--fpga=%s", fpga_name) != 1) {
+    if (sscanf(cmdarg, "--fpga=%29s", fpga_name) != 1) {
         return -1;
     }
 
-    fpga_type = fpga_type_from_str(fpga_name);
-    if (fpga_type == FPGA_TYPE_UNSUPPORTED) {
-        return -1;
+    FPGA_TYPE = fpga_type_from_str(fpga_name);
+    DEBUG_PRINT_C("Set FPGA type to %s", fpga_type_to_str[FPGA_TYPE]);
+    FPGA_TYPE_SET = true;
+    if (FPGA_TYPE == FPGA_TYPE_UNSUPPORTED) {
+        errx(EXIT_FAILURE, "Unsupported FPGA type: %s", fpga_name);
     }
 
     return 0;
@@ -184,3 +196,11 @@ struct ukvm_module ukvm_module_fpga = {
     .handle_cmdarg = handle_cmdarg,
     .usage = usage
 };
+
+int get_fpga_type(enum fpga_type *fpga_type) {
+    if (!FPGA_TYPE_SET)
+        return -1;
+
+    *fpga_type = FPGA_TYPE;
+    return 0;
+}

@@ -54,3 +54,8 @@ int send_msg_to_worker(struct thr_msg *msg)
 {
   return 0;
 }
+
+int get_fpga_type(enum fpga_type *fpga_type)
+{
+  return 0;
+}

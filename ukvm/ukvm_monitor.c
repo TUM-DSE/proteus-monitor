@@ -734,6 +734,11 @@ void loadfpga(char *load_file, long offset, struct ukvm_hv *hv)
         }
 
         thr_info.hv = hv;
+
+        ret = get_fpga_type(&thr_info.fpga_type);
+        warnx("Got FPGA type %d", thr_info.fpga_type);
+        if (ret != 0)
+            errx(EXIT_FAILURE, "FPGA type has not been set with the --fpga option");
     }
 
     /* read FPGA data */
