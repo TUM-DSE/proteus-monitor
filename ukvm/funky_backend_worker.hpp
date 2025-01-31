@@ -91,66 +91,84 @@ namespace funky_backend {
     return 0;
   }
 
-  /**
-   * Execute a kernel on FPGA
-   */
-  int handle_exec_request(struct ukvm_hv *hv, funky_backend::ClContext* context, funky_msg::request& req)
+  int handle_kernel_request(struct ukvm_hv* hv, funky_backend::ClContext* context,
+                            funky_msg::request& req)
   {
-    DEBUG_STREAM("received EXEC request. ");
+    DEBUG_STREAM("received a KERNEL request.");
 
     /* read arginfo from the guest memory */
-    int arg_num=0;
-    auto ptr  = req.get_arginfo_array(arg_num);
-    auto args = (funky_msg::arg_info*) UKVM_CHECKED_GPA_P(hv, (ukvm_gpa_t) ptr, sizeof(funky_msg::arg_info) * arg_num);
+    int arg_num = 0;
+    auto ptr = req.get_arginfo_array(arg_num);
+    auto args = (funky_msg::arg_info*)UKVM_CHECKED_GPA_P(hv, (ukvm_gpa_t)ptr,
+                                                         sizeof(funky_msg::arg_info) * arg_num);
 
     /* create kernel */
-    size_t name_size=0;
+    size_t name_size = 0;
     auto name_ptr = req.get_kernel_name(name_size);
-    auto kernel_name = (const char*) UKVM_CHECKED_GPA_P(hv, (ukvm_gpa_t) name_ptr, name_size);
+    auto kernel_name = (const char*)UKVM_CHECKED_GPA_P(hv, (ukvm_gpa_t)name_ptr, name_size);
     context->create_kernel(kernel_name);
 
     /* set arguments of kernel */
-    for (auto i=0; i<arg_num; i++)
-    {
+    for (auto i = 0; i < arg_num; i++) {
       auto arg = &(args[i]);
-      DEBUG_STREAM("set arg[" << i << "], mem_id: " << arg->mem_id );
+      DEBUG_STREAM("set arg[" << i << "], mem_id: " << arg->mem_id);
 
       /* if the argument is variable (mem_id == -1), do the address translation */
-      void* src=nullptr;
-      if(arg->mem_id < 0)
-      {
-        DEBUG_STREAM("scalar arg[" << i << "] addr: " << arg->src << ", size: " << arg->size );
-        src = UKVM_CHECKED_GPA_P(hv, (ukvm_gpa_t) arg->src, arg->size);
-      }
-      else 
-      {
-        DEBUG_STREAM("memobj arg[" << i << "], size: " << arg->size );
+      void* src = nullptr;
+      if (arg->mem_id < 0) {
+        DEBUG_STREAM("scalar arg[" << i << "] addr: " << arg->src << ", size: " << arg->size);
+        src = UKVM_CHECKED_GPA_P(hv, (ukvm_gpa_t)arg->src, arg->size);
+      } else {
+        DEBUG_STREAM("memobj arg[" << i << "], size: " << arg->size);
       }
 
       context->set_arg(kernel_name, arg, src);
     }
+
+    DEBUG_STREAM("KERNEL request is done.");
+    return 0;
+  }
+
+  /**
+   * Execute a kernel on FPGA
+   */
+  int handle_exec_request(struct ukvm_hv* hv, funky_backend::ClContext* context,
+                          funky_msg::request& req)
+  {
+    DEBUG_STREAM("received an EXEC request.");
+
+    /* create kernel */
+    size_t name_size = 0;
+    auto name_ptr = req.get_kernel_name(name_size);
+    auto kernel_name = (const char*)UKVM_CHECKED_GPA_P(hv, (ukvm_gpa_t)name_ptr, name_size);
 
     /* read event info */
     unsigned int num_events = 0;
     int* event_list_ids = nullptr;
     int event_id = -1;
     auto einfo_ptr = req.get_eventinfo();
-    if(einfo_ptr != nullptr)
-    {
-      auto einfo = (funky_msg::event_info*) UKVM_CHECKED_GPA_P(hv, (ukvm_gpa_t) einfo_ptr, sizeof(funky_msg::event_info*));
+    if (einfo_ptr != nullptr) {
+      auto einfo = (funky_msg::event_info*)UKVM_CHECKED_GPA_P(hv, (ukvm_gpa_t)einfo_ptr,
+                                                              sizeof(funky_msg::event_info*));
       num_events = einfo->wait_event_num;
-      event_list_ids = (num_events > 0)? (int*) UKVM_CHECKED_GPA_P(hv, (ukvm_gpa_t) einfo->wait_event_ids, sizeof(int) * num_events): nullptr;
-      event_id = einfo->id; 
-      DEBUG_STREAM("received event_info. id: " << einfo->id << ", num_events: " << num_events << ", list_addr: " << einfo->wait_event_ids);
+      event_list_ids = (num_events > 0)
+                           ? (int*)UKVM_CHECKED_GPA_P(hv, (ukvm_gpa_t)einfo->wait_event_ids,
+                                                      sizeof(int) * num_events)
+                           : nullptr;
+      event_id = einfo->id;
+      DEBUG_STREAM("received event_info. id: " << einfo->id << ", num_events: " << num_events
+                                               << ", list_addr: " << einfo->wait_event_ids);
     }
 
     /* execute the kernel */
     size_t ndparams[3];
     req.get_ndrange_params(ndparams[0], ndparams[1], ndparams[2]);
-    DEBUG_STREAM("offset=" << ndparams[0] << ", global=" << ndparams[1] << ", local=" << ndparams[2]);
-    context->enqueue_kernel(req.get_cmdq_id(), kernel_name, ndparams, num_events, event_list_ids, event_id);
+    DEBUG_STREAM("kernel=" << kernel_name << "offset=" << ndparams[0] << ", global=" << ndparams[1]
+                           << ", local=" << ndparams[2]);
+    context->enqueue_kernel(req.get_cmdq_id(), kernel_name, ndparams, num_events, event_list_ids,
+                            event_id);
 
-    DEBUG_STREAM("EXEC request is done. ");
+    DEBUG_STREAM("EXEC request is done.");
     return 0;
   }
 
@@ -235,6 +253,9 @@ namespace funky_backend {
           break;
         case SYNC: 
           handle_sync_request(hv, ctx, *req);
+          break;
+        case KERNEL:
+          handle_kernel_request(hv, ctx, *req);
           break;
         default:
           std::cout << "UKVM: Warning: an unknown request." << std::endl;

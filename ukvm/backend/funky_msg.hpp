@@ -18,14 +18,14 @@
 
 // TODO: change namespace? (e.g., funky_cmd? msg?)
 namespace funky_msg {
-  enum ReqType {MEMORY, TRANSFER, EXECUTE, SYNC};
+  enum ReqType {MEMORY, TRANSFER, EXECUTE, SYNC, KERNEL};
   enum MemType {BUFFER, PIPE, IMAGE};
   enum TransType {MIGRATE, WRITE, READ};
   enum SyncType {FINISH, PROFILE, WAITEVENTS};
 
   /**
    * mem_info is used to initialize memory objects on FPGA with input/output data.
-   * data flow/depenency of tasks is defined by arg_info in the subsequent EXEC resuests.
+   * data flow/dependency of tasks is defined by arg_info in the subsequent KERNEL requests.
    *
    * */
   struct mem_info {
@@ -118,17 +118,21 @@ namespace funky_msg {
       /* for TRANSFER request */
       transfer_info *trans; 
       
-      /* for EXECUTE request */
+      /* for KERNEL, EXECUTE request */
       const char* kernel_name;
       size_t name_size;
-      size_t ndrange[3]; // {global work offset, global work size, local work size}
+
+      /* for KERNEL request */
       uint32_t arg_num; 
       arg_info *args; 
 
-      /* for TRANSFER, EXECUTE, SYNC request */
+      /* for EXECUTE request */
+      size_t ndrange[3]; // {global work offset, global work size, local work size}
+
+      /* for TRANSFER, KERNEL, EXECUTE, SYNC request */
       uint32_t cmdq_id;
 
-      /* for SYNC request */
+      /* for TRANSFER, EXECUTE, SYNC request */
       SyncType sync_type;
       event_info *evinfo;
 
@@ -162,15 +166,25 @@ namespace funky_msg {
         evinfo = event_info;
       }
 
-      /* for EXEC request */
-      request(ReqType type, const char* name, size_t size, uint32_t num, void* ptr, uint32_t cl_cmdq_id, const size_t* ndrange_ptr, event_info* event_info)
+      /* for KERNEL request */
+      request(ReqType type, const char* name, size_t size, uint32_t num, void* ptr, uint32_t cl_cmdq_id)
+        : request(type)
+      {
+        // TODO: error if type != KERNEL
+        kernel_name = name;
+        name_size = size;
+        arg_num = num;
+        args    = (arg_info*) ptr;
+        cmdq_id = cl_cmdq_id;
+      }
+
+      /* for EXECUTE request */
+      request(ReqType type, const char* name, size_t size, uint32_t cl_cmdq_id, const size_t* ndrange_ptr, event_info* event_info)
         : request(type)
       {
         // TODO: error if type != EXEC
         kernel_name = name;
         name_size = size;
-        arg_num = num;
-        args    = (arg_info*) ptr;
         cmdq_id = cl_cmdq_id;
         for(auto i=0; i<3; i++)
           ndrange[i] = ndrange_ptr[i];

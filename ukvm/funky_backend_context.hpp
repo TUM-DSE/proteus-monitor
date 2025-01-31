@@ -294,6 +294,7 @@ namespace funky_backend {
           auto search = kernels.find(kernel_name);
           if(search == kernels.end()) {
             /* use kernel name as an index */
+            DEBUG_STREAM("Creating kernel " << kernel_name << ".");
             OCL_CHECK(err, kernels.emplace(kernel_name, cl::Kernel(*program, kernel_name, &err)));
             return;
           }
