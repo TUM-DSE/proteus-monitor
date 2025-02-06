@@ -163,7 +163,7 @@ namespace funky_backend {
     /* execute the kernel */
     size_t ndparams[3];
     req.get_ndrange_params(ndparams[0], ndparams[1], ndparams[2]);
-    DEBUG_STREAM("kernel=" << kernel_name << "offset=" << ndparams[0] << ", global=" << ndparams[1]
+    DEBUG_STREAM("kernel=" << kernel_name << ", offset=" << ndparams[0] << ", global=" << ndparams[1]
                            << ", local=" << ndparams[2]);
     context->enqueue_kernel(req.get_cmdq_id(), kernel_name, ndparams, num_events, event_list_ids,
                             event_id);
