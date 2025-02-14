@@ -1,6 +1,7 @@
 #ifndef __FUNKY_BACKEND_WORKER__
 #define __FUNKY_BACKEND_WORKER__
 
+#include "CL/cl_ext_xilinx.h"
 #include "funky_backend_core.h"
 #include "funky_backend_context.hpp"
 
@@ -43,6 +44,13 @@ namespace funky_backend {
       DEBUG_STREAM("mems[" << i << "], id: " << m->id << ", addr: " << std::hex << m->src << ", size: " << m->size << ", flags: " << m->flags);
 
       void* host_ptr = (m->src == nullptr)? nullptr: UKVM_CHECKED_GPA_P(hv, (ukvm_gpa_t) m->src, m->size);
+
+      /* host_ptr can be of type cl_mem_ext_ptr_t. In that case, we have to translate the address of host_ptr->obj.*/
+      if (m->flags & CL_MEM_EXT_PTR_XILINX) {
+        cl_mem_ext_ptr_t* p = (cl_mem_ext_ptr_t*)host_ptr;
+        p->obj = UKVM_CHECKED_GPA_P(hv, (ukvm_gpa_t)p->obj, sizeof(void*));
+      }
+
       context->create_buffer(m->id, m->flags, m->size, host_ptr, m->src);
     }
 
