@@ -279,6 +279,10 @@ void destroy_fpga_worker()
   }
   std::cout << "UKVM: confirm the worker thread is going to be destroyed.\n";
 
+  /* the worker thread may do some cleanup after sending MSG_END */
+  std::cout << "UKVM: waiting for worker thread to terminate.\n";
+  fpga_worker->join();
+
   /* release the smart pointer */
   msg_read_queue.release();
   msg_write_queue.release();
