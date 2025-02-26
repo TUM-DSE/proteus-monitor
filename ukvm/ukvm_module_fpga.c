@@ -42,6 +42,7 @@
 
 static enum fpga_type FPGA_TYPE = FPGA_TYPE_UNSUPPORTED;
 static bool FPGA_TYPE_SET = false;
+static bool OOO_ENABLED = false;
 
 const char *fpga_type_to_str[] = {"arria10", "u50", "u280", "unsupported"};
 
@@ -87,7 +88,7 @@ static void hypercall_fpgainit(struct ukvm_hv *hv, ukvm_gpa_t gpa)
     void* rd_queue_addr = UKVM_CHECKED_GPA_P(hv, fpga->rd_queue, fpga->rd_queue_len);
 
     if(wr_queue_addr && rd_queue_addr)
-      allocate_fpga(wr_queue_addr, rd_queue_addr, fpga_type);
+      allocate_fpga(wr_queue_addr, rd_queue_addr, fpga_type, OOO_ENABLED);
 
     if(bitstream)
       reconfigure_fpga(bitstream, fpga->bs_len);
@@ -108,7 +109,8 @@ static void hypercall_fpgainit(struct ukvm_hv *hv, ukvm_gpa_t gpa)
       fpga->rd_queue, 
       fpga->rd_queue_len,
       NULL,
-      0
+      0,
+      OOO_ENABLED
     };
 
     create_fpga_worker(thr_info);
@@ -150,6 +152,12 @@ static void hypercall_fpgareq(struct ukvm_hv *hv, ukvm_gpa_t gpa)
 
 static int handle_cmdarg(char *cmdarg)
 {
+    if (strcmp("--ooo", cmdarg) == 0) {
+        OOO_ENABLED = true;
+        DEBUG_PRINT_C("Enabled out-of-order execution for OpenCL command queue");
+        return 0;
+    }
+
     char fpga_name[30];
     if (sscanf(cmdarg, "--fpga=%29s", fpga_name) != 1) {
         return -1;

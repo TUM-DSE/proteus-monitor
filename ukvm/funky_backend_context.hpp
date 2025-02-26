@@ -62,13 +62,20 @@ namespace funky_backend {
 
       std::map<int, struct eventobj_header> migrated_events;
 
+      cl_command_queue_properties cmd_q_properties = CL_QUEUE_PROFILING_ENABLE;
+
 
     public:
-      ClContext(void* wr_queue_addr, void* rd_queue_addr) 
+      ClContext(void* wr_queue_addr, void* rd_queue_addr, bool ooo_enabled)
         : request_q(wr_queue_addr), 
           response_q(rd_queue_addr), 
-          bin_guest_addr(0), bin_size(0), 
-          mig_save_data(0), sync_flag(true), updated_flag(false) {}
+          bin_guest_addr(0), bin_size(0),
+          mig_save_data(0), sync_flag(true), updated_flag(false)
+      {
+        if (ooo_enabled) {
+          cmd_q_properties |= CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE;
+        }
+      }
 
       virtual ~ClContext()
       {}
@@ -209,7 +216,8 @@ namespace funky_backend {
       std::map<int, cl::Event> events;
 
       public:
-        AXClContext(void* wr_queue_addr, void* rd_queue_addr) : ClContext(wr_queue_addr, rd_queue_addr) {}
+        AXClContext(void* wr_queue_addr, void* rd_queue_addr, bool ooo_enabled)
+          : ClContext(wr_queue_addr, rd_queue_addr, ooo_enabled) {}
 
         virtual ~AXClContext()
         {}
@@ -343,7 +351,7 @@ namespace funky_backend {
           /* create a cmd queue if not exists */
           auto queue_in_map = queues.find(cmdq_id);
           if(queue_in_map == queues.end()) {
-            OCL_CHECK(err,  queues.emplace(cmdq_id, cl::CommandQueue(context, device, CL_QUEUE_PROFILING_ENABLE, &err)));
+            OCL_CHECK(err,  queues.emplace(cmdq_id, cl::CommandQueue(context, device, cmd_q_properties, &err)));
             DEBUG_STREAM("UKVM: new cmd queue (id: " << cmdq_id << ") is created. ");
           }
 
@@ -379,7 +387,7 @@ namespace funky_backend {
           auto queue_in_map = queues.find(cmdq_id);
           if(queue_in_map == queues.end()) {
             cl_int err;
-            OCL_CHECK(err,  queues.emplace(cmdq_id, cl::CommandQueue(context, device, CL_QUEUE_PROFILING_ENABLE, &err)));
+            OCL_CHECK(err,  queues.emplace(cmdq_id, cl::CommandQueue(context, device, cmd_q_properties, &err)));
             DEBUG_STREAM("new cmd queue (id: " << cmdq_id << ") is created. ");
           }
 
@@ -432,7 +440,7 @@ namespace funky_backend {
           auto queue_in_map = queues.find(cmdq_id);
           if(queue_in_map == queues.end()) {
             cl_int err;
-            OCL_CHECK(err,  queues.emplace(cmdq_id, cl::CommandQueue(context, device, CL_QUEUE_PROFILING_ENABLE, &err)));
+            OCL_CHECK(err,  queues.emplace(cmdq_id, cl::CommandQueue(context, device, cmd_q_properties, &err)));
             DEBUG_STREAM("UKVM: new cmd queue (id: " << cmdq_id << ") is created. ");
           }
 
@@ -769,7 +777,8 @@ namespace funky_backend {
 
   class XoclContext : public AXClContext {
     public:
-      XoclContext(void* wr_queue_addr, void* rd_queue_addr, enum fpga_type fpga_type) : AXClContext(wr_queue_addr, rd_queue_addr) {
+      XoclContext(void* wr_queue_addr, void* rd_queue_addr, enum fpga_type fpga_type, bool ooo_enabled)
+        : AXClContext(wr_queue_addr, rd_queue_addr, ooo_enabled) {
         cl_int err;
 
         auto devices = xcl::get_xil_devices();
@@ -808,7 +817,7 @@ namespace funky_backend {
         // Creating Context and Command Queue for selected Device
         OCL_CHECK(err, context = cl::Context(device, NULL, NULL, NULL, &err));
         // OCL_CHECK(err, queue = cl::CommandQueue(context, device, CL_QUEUE_PROFILING_ENABLE, &err));
-        OCL_CHECK(err,  queues.emplace(0, cl::CommandQueue(context, device, CL_QUEUE_PROFILING_ENABLE, &err)));
+        OCL_CHECK(err,  queues.emplace(0, cl::CommandQueue(context, device, cmd_q_properties, &err)));
         // OCL_CHECK(err,  queues.emplace(0, cl::CommandQueue(context, device, CL_QUEUE_PROFILING_ENABLE | CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE, &err)));
       }
 
@@ -829,7 +838,8 @@ namespace funky_backend {
 
   class AoclContext : public AXClContext {
     public:
-      AoclContext(void* wr_queue_addr, void* rd_queue_addr) : AXClContext(wr_queue_addr, rd_queue_addr){
+      AoclContext(void* wr_queue_addr, void* rd_queue_addr, bool ooo_enabled)
+        : AXClContext(wr_queue_addr, rd_queue_addr, ooo_enabled) {
         cl_int err;
 
         // TODO: assign as many devices to the guest as requested  
@@ -847,7 +857,7 @@ namespace funky_backend {
         // Creating Context and Command Queue for selected Device
         OCL_CHECK(err, context = cl::Context(device, NULL, NULL, NULL, &err));
         // OCL_CHECK(err, queue = cl::CommandQueue(context, device, CL_QUEUE_PROFILING_ENABLE, &err));
-        OCL_CHECK(err,  queues.emplace(0, cl::CommandQueue(context, device, CL_QUEUE_PROFILING_ENABLE, &err)));
+        OCL_CHECK(err,  queues.emplace(0, cl::CommandQueue(context, device, cmd_q_properties, &err)));
         // OCL_CHECK(err,  queues.emplace(0, cl::CommandQueue(context, device, CL_QUEUE_PROFILING_ENABLE | CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE, &err)));
       }
 

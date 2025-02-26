@@ -13,6 +13,7 @@ extern "C" {
 #include<stddef.h>
 #include<stdint.h>
 #include <limits.h>
+#include <stdbool.h>
 
 #include "ukvm.h"
 #include "funky_debug_c.h"
@@ -41,6 +42,8 @@ struct fpga_thr_info
 
   void* mig_data;
   size_t mig_size;
+
+  bool ooo_enabled;
 };
 
 void create_fpga_worker(struct fpga_thr_info thr_info);

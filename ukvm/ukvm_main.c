@@ -108,6 +108,7 @@ static void usage(const char *prog)
     fprintf(stderr, "Core options:\n");
     fprintf(stderr, "  [ --mem=512 ] (guest memory in MB)\n");
     fprintf(stderr, "  [ --mon=<path_to_socket> ] socket for passing commands\n");
+    fprintf(stderr, "  [ --ooo ] enable out-of-order execution for the OpenCL command queue\n");
     fprintf(stderr, "    --help (display this help)\n");
     fprintf(stderr, "Compiled-in modules: ");
     for (struct ukvm_module **m = ukvm_core_modules; *m; m++) {
