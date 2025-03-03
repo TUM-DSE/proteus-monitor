@@ -209,10 +209,17 @@ int ukvm_hv_vcpu_loop(struct ukvm_hv *hv)
             } else {
                 struct timespec start, end;
                 clock_gettime(CLOCK_MONOTONIC, &start);
-                savevm(hv);
+                long vm_state_bytes = savevm(hv);
+                clock_gettime(CLOCK_MONOTONIC, &end);
+                double savevm_time = (double)(end.tv_sec - start.tv_sec) + ((double)(end.tv_nsec - start.tv_nsec) / 1000000000L);
+
+                clock_gettime(CLOCK_MONOTONIC, &start);
                 savefpga(hv);
                 clock_gettime(CLOCK_MONOTONIC, &end);
-                printf("savevm(): %lf s\n", (double)(end.tv_sec - start.tv_sec) + ((double)(end.tv_nsec - start.tv_nsec) / 1000000000L) );
+                double savefpga_time = (double)(end.tv_sec - start.tv_sec) + ((double)(end.tv_nsec - start.tv_nsec) / 1000000000L);
+
+                printf("saved page size[MB],savefpga()[s],savevm()[s]\n");
+                printf("%ld,%.9lf,%.9lf\n", vm_state_bytes, savefpga_time, savevm_time);
                 errx(7, "Stopped to save VM state");
             }
         }
@@ -263,8 +270,19 @@ int ukvm_hv_vcpu_loop(struct ukvm_hv *hv)
                 *(uint32_t *)((uint8_t *)run + run->io.data_offset);
             fn(hv, gpa);
             if (check_vm_state() == 3) {
-                savevm(hv);
+                struct timespec start, end;
+                clock_gettime(CLOCK_MONOTONIC, &start);
+                long vm_state_bytes = savevm(hv);
+                clock_gettime(CLOCK_MONOTONIC, &end);
+                double savevm_time = (double)(end.tv_sec - start.tv_sec) + ((double)(end.tv_nsec - start.tv_nsec) / 1000000000L);
+
+                clock_gettime(CLOCK_MONOTONIC, &start);
                 savefpga(hv);
+                clock_gettime(CLOCK_MONOTONIC, &end);
+                double savefpga_time = (double)(end.tv_sec - start.tv_sec) + ((double)(end.tv_nsec - start.tv_nsec) / 1000000000L);
+
+                printf("saved page size[MB],savefpga()[s],savevm()[s]\n");
+                printf("%ld,%.9lf,%.9lf\n", vm_state_bytes, savefpga_time, savevm_time);
                 errx(1, "Stopped to save VM state");
             }
             break;

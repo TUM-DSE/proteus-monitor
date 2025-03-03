@@ -100,6 +100,9 @@ static void handle_mon_com(char *com_mon, pthread_t thr)
      * Moreoer the fpga execution will be stopped.
      */
     if (strcmp(com_mon, "save_fpga") == 0) {
+        struct timespec start, end;
+        clock_gettime(CLOCK_MONOTONIC, &start);
+
         if(is_fpga_worker_alive()) {
       	    struct thr_msg rcv_msg;
       	    struct thr_msg data_msg;
@@ -135,6 +138,12 @@ static void handle_mon_com(char *com_mon, pthread_t thr)
       	} else {
       	    warnx("Fpga worker is not running\n");
       	}
+
+        clock_gettime(CLOCK_MONOTONIC, &end);
+        // printf("save_fpga, %.9lf s\n", (double)(end.tv_sec - start.tv_sec) + ((double)(end.tv_nsec - start.tv_nsec) / 1000000000L) );
+        printf("save_fpga()[s]\n");
+        printf("%.9lf\n", (double)(end.tv_sec - start.tv_sec) + ((double)(end.tv_nsec - start.tv_nsec) / 1000000000L) );
+
         return;
     }
 
@@ -143,6 +152,9 @@ static void handle_mon_com(char *com_mon, pthread_t thr)
      * which were previously saved using savefpga command.
      */
     if (strcmp(com_mon, "load_fpga") == 0) {
+        struct timespec start, end;
+        clock_gettime(CLOCK_MONOTONIC, &start);
+
 	      struct thr_msg rcv_msg;
 
 	      printf("I got load_fpga command\n");
@@ -155,6 +167,11 @@ static void handle_mon_com(char *com_mon, pthread_t thr)
 	      if(rcv_msg.msg_type != MSG_INIT)
 	          printf("Warning: not MSG_INIT \n");
 
+        clock_gettime(CLOCK_MONOTONIC, &end);
+        // printf("load_fpga, %.9lf s\n", (double)(end.tv_sec - start.tv_sec) + ((double)(end.tv_nsec - start.tv_nsec) / 1000000000L) );
+        printf("load_fpga()[s]\n");
+        printf("%.9lf\n", (double)(end.tv_sec - start.tv_sec) + ((double)(end.tv_nsec - start.tv_nsec) / 1000000000L) );
+
 	      free(thr_info);
 	      thr_info = NULL;
         return;
@@ -166,6 +183,8 @@ static void handle_mon_com(char *com_mon, pthread_t thr)
     if (strncmp(com_mon, "savevm", 6) == 0) {
         int r;
         // DEBUG_PRINT_C("MON-THR: savevm command is received.");
+        struct timespec start, end;
+        clock_gettime(CLOCK_MONOTONIC, &start);
 
         if (strlen(com_mon) <= 7)
             return; /* Do nothing */
@@ -179,7 +198,7 @@ static void handle_mon_com(char *com_mon, pthread_t thr)
         if(is_fpga_worker_alive())
         {
             struct thr_msg recv_msg;
-            printf("MON-THR: start save_fpga() ...\n");
+            // printf("MON-THR: start save_fpga() ...\n");
 
             // 0. receive an initial msg from Worker
             recv_msg_from_worker(&recv_msg);
@@ -192,16 +211,21 @@ static void handle_mon_com(char *com_mon, pthread_t thr)
             send_msg_to_worker(&msg);
 
             // 2. Wait for a response from Worker (sync point e.g., clFinish(), clWaitForEvents())
+            // NOTE: currently, FPGA sync also includes a process to save FPGA memory buffers into host-side shared buffers. 
             recv_msg_from_worker(&recv_msg);
             if(recv_msg.msg_type != MSG_SYNCED)
                 printf("Warning: not MSG_SYNCED \n");
 
             /* FPGA is synced now */
         }
+        clock_gettime(CLOCK_MONOTONIC, &end);
+        printf("[monitor_thr] savefpga() overhead...\n");
+        printf("savefpga()[s]\n");
+        printf("%.9lf\n", (double)(end.tv_sec - start.tv_sec) + ((double)(end.tv_nsec - start.tv_nsec) / 1000000000L));
 
         save_file = strtok(com_mon, " ");
         save_file = strtok(NULL, " ");
-        warnx("I will save VM in file %s", save_file);
+        // warnx("I will save VM in file %s", save_file);
         atomic_set(&vm_state, 3);
         r = pthread_kill(thr, SIGUSR1);
         if (r < 0)
@@ -326,7 +350,7 @@ char *handle_load(char *cmdarg)
  */
 static void ipi_signal(int sig)
 {
-    printf("hello thereeeee\n");
+    // printf("hello thereeeee\n");
 }
 
 void init_cpu_signals()
@@ -349,7 +373,7 @@ void init_cpu_signals()
 
 #define MSR_IA32_TSC                    0x10
 
-void savevm(struct ukvm_hv *hv)
+long savevm(struct ukvm_hv *hv)
 {
     int fd;
     struct kvm_regs kregs;
@@ -369,18 +393,18 @@ void savevm(struct ukvm_hv *hv)
     fd = open(save_file, O_WRONLY | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR);
     if (fd < 0) {
         warn("savevm: open(%s)", save_file);
-        return;
+        return -1;
     }
     warnx("savevm: save guest to: %s", save_file);
 
     if (ioctl(hv->b->vcpufd, KVM_GET_SREGS, &sregs) == -1) {
         warn("savevm: KVM: ioctl(KVM_GET_SREGS) failed");
-        return;
+        return -1;
     }
 
     if (ioctl(hv->b->vcpufd, KVM_GET_REGS, &kregs) == -1) {
         warn("savevm: KVM: ioctl(KVM_GET_REGS) failed");
-        return;
+        return -1;
     }
 
     memset(&msr_data, 0, sizeof(msr_data));
@@ -388,7 +412,7 @@ void savevm(struct ukvm_hv *hv)
     msr_data.entries[0].index = MSR_IA32_TSC;
     if (ioctl(hv->b->vcpufd, KVM_GET_MSRS, &msr_data) == -1 ) {
         warn("savevm: KVM: ioctl(KVM_GET_REGS) failed");
-        return;
+        return -1;
     }
     tsc = msr_data.entries[0].data;
     assert(tsc != 0);
@@ -396,37 +420,37 @@ void savevm(struct ukvm_hv *hv)
     nbytes = write(fd, &kregs, sizeof(struct kvm_regs));
     if (nbytes < 0) {
         warn("savevm: Error writing kvm_regs");
-        return;
+        return -1;
     }
     else if (nbytes != sizeof(struct kvm_regs)) {
         warnx("savevm: Short write() writing kvm_regs: %zd", nbytes);
-        return;
+        return -1;
     }
 
     nbytes = write(fd, &sregs, sizeof(struct kvm_sregs));
     if (nbytes < 0) {
         warn("savevm: Error writing kvm_sregs");
-        return;
+        return -1;
     }
     else if (nbytes != sizeof(struct kvm_sregs)) {
         warnx("savevm: Short write() writing kvm_sregs: %zd", nbytes);
-        return;
+        return -1;
     }
 
     nbytes = write(fd, &msr_data, sizeof(msr_data));
     if (nbytes < 0) {
         warn("savevm: Error writing kvm_regs");
-        return;
+        return -1;
     }
     else if (nbytes != sizeof(msr_data)) {
         warnx("savevm: Short write() writing msr_data: %zd", nbytes);
-        return;
+        return -1;
     }
 
     page_size = sysconf(_SC_PAGESIZE);
     if (page_size == -1) {
         warn("savevm: Could not determine _SC_PAGESIZE");
-        return;
+        return -1;
     }
     assert (hv->mem_size % page_size == 0);
     npages = hv->mem_size / page_size;
@@ -434,25 +458,28 @@ void savevm(struct ukvm_hv *hv)
     assert (mvec);
     if (mincore(hv->mem, hv->mem_size, mvec) == -1) {
         warn("savevm: mincore() failed");
-        return;
+        return -1;
     }
     nbytes = write(fd, &page_size, sizeof(long));
     if (nbytes == -1) {
         warn("savevm: Error writing page size");
         free(mvec);
-        return;
+        return -1;
     } else if (nbytes != sizeof(long)) {
         warnx("savevm: Short write in page size");
         free(mvec);
-        return;
+        return -1;
     }
     num_pgs_off = lseek(fd, 0, SEEK_CUR);
     file_off = num_pgs_off + sizeof(size_t);
     if (lseek(fd, file_off, SEEK_SET) != file_off) {
-        warnx("savevm: COuld not set file offset");
+        warnx("savevm: Could not set file offset");
         free(mvec);
-        return;
+        return -1;
     }
+
+    // struct timespec start, end;
+    // clock_gettime(CLOCK_MONOTONIC, &start);
     for (size_t pg = 0; pg < npages; pg++) {
         if (mvec[pg] & 1) {
             off_t pgoff = (pg * page_size);
@@ -460,39 +487,45 @@ void savevm(struct ukvm_hv *hv)
             if (nbytes == -1) {
                 warn("savevm: Error dumping guest memory page %zd", pg);
                 free(mvec);
-                return;
+                return -1;
             } else if (nbytes != sizeof(size_t)) {
                 warnx("savevm: Short write dumping guest memory page"
                         "%zd: %zd bytes", pg, nbytes);
                 free(mvec);
-                return;
+                return -1;
             }
             nbytes = write(fd, hv->mem + pgoff, page_size);
             if (nbytes == -1) {
                 warn("savevm: Error dumping guest memory page %zd", pg);
                 free(mvec);
-                return;
+                return -1;
             } else if (nbytes != page_size) {
                 warnx("savevm: Short write dumping guest memory page"
                         "%zd: %zd bytes", pg, nbytes);
                 free(mvec);
-                return;
+                return -1;
             }
             ndumped++;
         }
     }
     free(mvec);
     warnx("savevm: dumped %zd pages of total %zd pages", ndumped, npages);
+    // clock_gettime(CLOCK_MONOTONIC, &end);
+    // double savevm_page_time  = (double)(end.tv_sec - start.tv_sec) + ((double)(end.tv_nsec - start.tv_nsec) / 1000000000L);
+    long savevm_page_bytes = (ndumped * page_size);
+
     nbytes = pwrite(fd, &ndumped, sizeof(size_t), num_pgs_off);
     if (nbytes == -1) {
         warn("savevm: Error writing total saved pages %zd", ndumped);
-        return;
+        return -1;
     } else if (nbytes != sizeof(size_t)) {
         warnx("savevm: Short write on total saved pages"
                 " %zd: %zd bytes", ndumped, nbytes);
-        return;
+        return -1;
     }
     close(fd);
+
+    return savevm_page_bytes;
 }
 
 long loadvm(char *load_file, struct ukvm_hv *hv)
@@ -564,6 +597,9 @@ long loadvm(char *load_file, struct ukvm_hv *hv)
             warnx("Could not read total pages number");
         warnx("Incomplete read of page_size\n");
     }
+
+    struct timespec start, end;
+    clock_gettime(CLOCK_MONOTONIC, &start);
     warnx("loadvm: I need to read %ld pages", total_pgs);
     for(int i = 0; i < total_pgs; i++) {
         off_t pgoff;
@@ -588,7 +624,15 @@ long loadvm(char *load_file, struct ukvm_hv *hv)
             break;
         }
     }
-    warnx("loadvm: loaded %ld pages with page size %ld", total_pgs, page_size);
+    // warnx("loadvm: loaded %ld pages with page size %ld", total_pgs, page_size);
+    clock_gettime(CLOCK_MONOTONIC, &end);
+
+    double loadvm_page_time  = (double)(end.tv_sec - start.tv_sec) + ((double)(end.tv_nsec - start.tv_nsec) / 1000000000L);
+    long loadvm_page_bytes = total_pgs * page_size;
+    printf("loaded page size[Bytes],loadvm (page-only)[s],loadvm()[s]\n");
+    printf("%ld,%.9lf,", loadvm_page_bytes, loadvm_page_time);
+
+    // printf("loadvm (load pages only), %.9lf, sec, %.3lf, MiB\n", (double)(end.tv_sec - start.tv_sec) + ((double)(end.tv_nsec - start.tv_nsec) / 1000000000L), (total_pgs * page_size) / (double) (1024*1024) );
 
     off_t offset = lseek(fd, 0, SEEK_CUR);
 

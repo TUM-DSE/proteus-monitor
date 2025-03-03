@@ -236,7 +236,9 @@ int main(int argc, char **argv)
         long offset = loadvm(mig_file, hv);
         loadfpga(mig_file, offset, hv);
         clock_gettime(CLOCK_MONOTONIC, &end);
-        printf("loadvm(): %lf s\n", (double)(end.tv_sec - start.tv_sec) + ((double)(end.tv_nsec - start.tv_nsec) / 1000000000L) );
+        // printf("loadvm(): %lf s\n", (double)(end.tv_sec - start.tv_sec) + ((double)(end.tv_nsec - start.tv_nsec) / 1000000000L) );
+        // printf("loadvm()[s]\n");
+        printf("%.9lf\n", (double)(end.tv_sec - start.tv_sec) + ((double)(end.tv_nsec - start.tv_nsec) / 1000000000L) );
     }
 
     if (set_mem_prot(hv->list))

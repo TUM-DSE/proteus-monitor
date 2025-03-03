@@ -103,11 +103,28 @@ void create_fpga_worker(struct fpga_thr_info thr_info)
 
   auto fpga_worker_thread = [](struct fpga_thr_info thr_info, void* rq_addr, void* wq_addr)
   {
+    struct timespec start, end;
+
+    clock_gettime(CLOCK_MONOTONIC, &start);
     funky_backend::Worker worker(thr_info, rq_addr, wq_addr);
+    clock_gettime(CLOCK_MONOTONIC, &end);
+    auto worker_init_time = (double)(end.tv_sec - start.tv_sec) + ((double)(end.tv_nsec - start.tv_nsec) / 1000000000L);
     
     /* reconfigure FPGA & load FPGA memory from migration file (if mig_file exists) */
+    clock_gettime(CLOCK_MONOTONIC, &start);
     worker.reconfigure_fpga();
+    clock_gettime(CLOCK_MONOTONIC, &end);
+    auto reconf_time = (double)(end.tv_sec - start.tv_sec) + ((double)(end.tv_nsec - start.tv_nsec) / 1000000000L);
+
+    clock_gettime(CLOCK_MONOTONIC, &start);
     worker.load_fpga();
+    clock_gettime(CLOCK_MONOTONIC, &end);
+    auto load_fpga_time = (double)(end.tv_sec - start.tv_sec) + ((double)(end.tv_nsec - start.tv_nsec) / 1000000000L);
+
+    /* print overhead analysis for FPGA_load */
+    printf("[worker_thr] FPGA_load (init) overhead breakdown...\n");
+    printf("worker_init[s],fpga_reconf[s],load_fpga[s]\n");
+    printf("%.9lf,%.9lf,%.9lf\n", worker_init_time, reconf_time, load_fpga_time);
 
     /* inform another thread that Worker has been initialized */
     struct thr_msg init_msg = {MSG_INIT, NULL, 0};
@@ -162,9 +179,12 @@ void create_fpga_worker(struct fpga_thr_info thr_info)
      *
      * TODO: this is not allowed if pipelined kernels are enqueued. 
      */
+    clock_gettime(CLOCK_MONOTONIC, &start);
     if(worker.check_sync_point() == false)
       worker.sync_fpga_by_worker();
       // worker.handle_fpga_requests();
+    clock_gettime(CLOCK_MONOTONIC, &end);
+    auto sync_fpga_time = (double)(end.tv_sec - start.tv_sec) + ((double)(end.tv_nsec - start.tv_nsec) / 1000000000L);
 
     /* 
      * Write back OpenCL memory objects with CL_MEM_USE_HOST_PTR flag to guest memory 
@@ -176,11 +196,10 @@ void create_fpga_worker(struct fpga_thr_info thr_info)
      * must be written back in the guest memory before starting to save VM contexts. 
      *
      * */
+    clock_gettime(CLOCK_MONOTONIC, &start);
     worker.sync_fpga_memory();
-
-    /* send 'sync' msg to Monitor */
-    struct thr_msg sync_msg = {MSG_SYNCED, NULL, 0};
-    worker.send_msg(sync_msg);
+    clock_gettime(CLOCK_MONOTONIC, &end);
+    auto sync_fpga_mem_time = (double)(end.tv_sec - start.tv_sec) + ((double)(end.tv_nsec - start.tv_nsec) / 1000000000L);
 
     /* callback function for KILLWORKER msg */
     auto cb_for_killworker = [](struct thr_msg* msg) {
@@ -189,15 +208,27 @@ void create_fpga_worker(struct fpga_thr_info thr_info)
     };
 
     if(worker.is_fpga_updated()) {
-      DEBUG_STREAM("worker: saving FPGA data...");
+      DEBUG_STREAM("worker: saving unshared FPGA context...");
+
+      /* save unshared FPGA data */
+      clock_gettime(CLOCK_MONOTONIC, &start);
+      auto save_data = worker.save_fpga(); 
+      clock_gettime(CLOCK_MONOTONIC, &end);
+      auto save_fpga_time = (double)(end.tv_sec - start.tv_sec) + ((double)(end.tv_nsec - start.tv_nsec) / 1000000000L);
+      
+      /* print overhead analysis for FPGA_save */
+      printf("[worker_thr] FPGA_save overhead breakdown...\n");
+      printf("sync_fpga[s],sync_fpga_mem_only[s],save_fpga[s]\n");
+      printf("%.9lf,%.9lf,%.9lf\n", sync_fpga_time, sync_fpga_mem_time, sync_fpga_mem_time+save_fpga_time);
+
+      /* send 'sync' msg to Monitor */
+      struct thr_msg sync_msg = {MSG_SYNCED, NULL, 0};
+      worker.send_msg(sync_msg);
 
       /* send 'updated' msg to vCPU */
       auto p_thr_info = worker.get_thr_info();
       struct thr_msg updated_msg = {MSG_UPDATED, p_thr_info, sizeof(struct fpga_thr_info)};
       worker.send_msg(updated_msg);
-
-      /* save FPGA data (Meanwhile, vCPU is performing savevm()) */
-      auto save_data = worker.save_fpga(); 
 
       /* send FPGA data to vCPU */
       struct thr_msg data_msg = {MSG_SAVED, save_data.data(), save_data.size()};

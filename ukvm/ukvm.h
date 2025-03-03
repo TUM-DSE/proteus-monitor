@@ -265,7 +265,7 @@ void init_cpu_signals();
 /*
  * Save vm state
  */
-void savevm(struct ukvm_hv *hv);
+long savevm(struct ukvm_hv *hv);
 
 /*
  * Load VM from file. The file should have been created by 
