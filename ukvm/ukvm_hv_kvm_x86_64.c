@@ -218,7 +218,7 @@ int ukvm_hv_vcpu_loop(struct ukvm_hv *hv)
                 clock_gettime(CLOCK_MONOTONIC, &end);
                 double savefpga_time = (double)(end.tv_sec - start.tv_sec) + ((double)(end.tv_nsec - start.tv_nsec) / 1000000000L);
 
-                printf("saved page size[MB],savefpga()[s],savevm()[s]\n");
+                printf("saved page size[Bytes],savefpga()[s],savevm()[s]\n");
                 printf("%ld,%.9lf,%.9lf\n", vm_state_bytes, savefpga_time, savevm_time);
                 errx(7, "Stopped to save VM state");
             }
@@ -281,7 +281,7 @@ int ukvm_hv_vcpu_loop(struct ukvm_hv *hv)
                 clock_gettime(CLOCK_MONOTONIC, &end);
                 double savefpga_time = (double)(end.tv_sec - start.tv_sec) + ((double)(end.tv_nsec - start.tv_nsec) / 1000000000L);
 
-                printf("saved page size[MB],savefpga()[s],savevm()[s]\n");
+                printf("saved page size[Bytes],savefpga()[s],savevm()[s]\n");
                 printf("%ld,%.9lf,%.9lf\n", vm_state_bytes, savefpga_time, savevm_time);
                 errx(1, "Stopped to save VM state");
             }
