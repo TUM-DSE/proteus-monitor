@@ -523,6 +523,14 @@ long savevm(struct ukvm_hv *hv)
                 " %zd: %zd bytes", ndumped, nbytes);
         return -1;
     }
+
+    // Ensure the snapshot is written back to the storage device
+    if (fsync(fd) == -1)
+    {
+        warn("fsync: fail to sync the saved snapshot");
+        return -1;
+    }
+
     close(fd);
 
     return savevm_page_bytes;
@@ -541,6 +549,9 @@ long loadvm(char *load_file, struct ukvm_hv *hv)
         struct kvm_msr_entry entries[1];
     } msr_data = {};
 
+    // TODO: 
+    // This is not using O_DIRECT option, so the loadvm performance is affected by OS page caches. 
+    // Clear the page cache to avoid the unexpected speedup: sudo sh -c "sync; echo 3 > /proc/sys/vm/drop_caches" 
     fd = open(load_file, O_RDONLY);
     if (fd < 0) {
         warn("loadvm: open(%s)", load_file);
