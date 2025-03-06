@@ -122,9 +122,12 @@ void create_fpga_worker(struct fpga_thr_info thr_info)
     auto load_fpga_time = (double)(end.tv_sec - start.tv_sec) + ((double)(end.tv_nsec - start.tv_nsec) / 1000000000L);
 
     /* print overhead analysis for FPGA_load */
-    printf("[worker_thr] FPGA_load (init) overhead breakdown...\n");
-    printf("worker_init[s],fpga_reconf[s],load_fpga[s]\n");
-    printf("%.9lf,%.9lf,%.9lf\n", worker_init_time, reconf_time, load_fpga_time);
+    if (thr_info.mig_data != NULL)
+    {
+      printf("[worker_thr] FPGA_load overhead breakdown...\n");
+      printf("worker_init[s],fpga_reconf[s],load_fpga[s]\n");
+      printf("%.9lf,%.9lf,%.9lf\n", worker_init_time, reconf_time, load_fpga_time);
+    }
 
     /* inform another thread that Worker has been initialized */
     struct thr_msg init_msg = {MSG_INIT, NULL, 0};
