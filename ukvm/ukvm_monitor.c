@@ -219,8 +219,8 @@ static void handle_mon_com(char *com_mon, pthread_t thr)
             /* FPGA is synced now */
         }
         clock_gettime(CLOCK_MONOTONIC, &end);
-        printf("[monitor_thr] savefpga() overhead...\n");
-        printf("savefpga()[s]\n");
+        printf("[monitor_thr] save_fpga() overhead...\n");
+        printf("save_fpga()[s]\n");
         printf("%.9lf\n", (double)(end.tv_sec - start.tv_sec) + ((double)(end.tv_nsec - start.tv_nsec) / 1000000000L));
 
         save_file = strtok(com_mon, " ");
