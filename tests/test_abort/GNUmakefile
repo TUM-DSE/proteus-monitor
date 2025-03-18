@@ -19,6 +19,6 @@
 UKVM_TARGETS=test_abort.ukvm ukvm-bin
 VIRTIO_TARGETS=test_abort.virtio
 MUEN_TARGETS=test_abort.muen
-UKVM_MODULES=dumpcore
+UKVM_MODULES=dumpcore fpga
 
 include ../Makefile.tests

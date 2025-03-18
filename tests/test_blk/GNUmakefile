@@ -18,6 +18,6 @@
 
 UKVM_TARGETS=test_blk.ukvm ukvm-bin
 VIRTIO_TARGETS=test_blk.virtio
-UKVM_MODULES=blk
+UKVM_MODULES=blk fpga
 
 include ../Makefile.tests

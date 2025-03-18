@@ -19,6 +19,6 @@
 UKVM_TARGETS=test_migration.ukvm ukvm-bin
 VIRTIO_TARGETS=test_migration.virtio
 MUEN_TARGETS=test_migration.muen
-UKVM_MODULES=gdb
+UKVM_MODULES=gdb fpga
 
 include ../Makefile.tests

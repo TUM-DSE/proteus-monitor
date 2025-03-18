@@ -19,6 +19,6 @@
 UKVM_TARGETS=test_fpu.ukvm ukvm-bin
 VIRTIO_TARGETS=test_fpu.virtio
 MUEN_TARGETS=test_fpu.muen
-UKVM_MODULES=
+UKVM_MODULES=fpga
 
 include ../Makefile.tests

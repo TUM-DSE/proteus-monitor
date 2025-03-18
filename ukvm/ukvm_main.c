@@ -109,6 +109,7 @@ static void usage(const char *prog)
     fprintf(stderr, "  [ --mem=512 ] (guest memory in MB)\n");
     fprintf(stderr, "  [ --mon=<path_to_socket> ] socket for passing commands\n");
     fprintf(stderr, "  [ --ooo ] enable out-of-order execution for the OpenCL command queue\n");
+    fprintf(stderr, "  [ --checkpoint ] use persistent storage to save VM snapshots (for checkpointing) \n");
     fprintf(stderr, "    --help (display this help)\n");
     fprintf(stderr, "Compiled-in modules: ");
     for (struct ukvm_module **m = ukvm_core_modules; *m; m++) {
@@ -181,6 +182,12 @@ int main(int argc, char **argv)
         if (strncmp("--mon=", *argv, 6) == 0) {
             handle_mon(*argv);
             matched = 1;
+            argc--;
+            argv++;
+        }
+        if (strcmp("--checkpoint", *argv) == 0) {
+            matched = 1;
+            save_in_memory_flag = false;
             argc--;
             argv++;
         }

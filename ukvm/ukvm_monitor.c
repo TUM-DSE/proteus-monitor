@@ -49,6 +49,17 @@ static struct fpga_thr_info *thr_info = NULL;
  */
 static char *save_file;
 
+
+/*
+ * for experiments to measure VM migration overheads
+ * true - save VM snapshots into shared memory buffers
+ * false - save them into persistent storage (e.g., SSD)
+ *
+ * TODO: simplify the implementation to select where to save snapshots
+ */
+bool save_in_memory_flag = true;
+off_t savevm_offset = 0;
+
 /*
  * Handle the incomming commands
  */
@@ -373,6 +384,8 @@ void init_cpu_signals()
 
 #define MSR_IA32_TSC                    0x10
 
+#define SHM_SIZE 4LL * 1024 * 1024 * 1024
+
 long savevm(struct ukvm_hv *hv)
 {
     int fd;
@@ -383,14 +396,28 @@ long savevm(struct ukvm_hv *hv)
     size_t npages;
     size_t ndumped = 0;
     host_mvec_t mvec;
-    off_t num_pgs_off, file_off;
+    off_t num_pgs_off = 0;
+    off_t file_off;
     struct {
         struct kvm_msrs info;
         struct kvm_msr_entry entries[1];
     } msr_data = {};
     uint64_t tsc;
 
-    fd = open(save_file, O_WRONLY | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR);
+    char* shm_ptr = NULL;
+    off_t shm_ptr_offset = 0;
+    if(save_in_memory_flag) {
+        fd = shm_open(save_file, O_CREAT | O_RDWR, 0666);
+        if(ftruncate(fd, SHM_SIZE) == -1) {
+            warn("savevm: ftruncate(%s)", save_file);
+            return -1;
+        }
+        shm_ptr = mmap(0, SHM_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    }
+    else {
+        fd = open(save_file, O_WRONLY | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR);
+    }
+
     if (fd < 0) {
         warn("savevm: open(%s)", save_file);
         return -1;
@@ -417,34 +444,51 @@ long savevm(struct ukvm_hv *hv)
     tsc = msr_data.entries[0].data;
     assert(tsc != 0);
 
-    nbytes = write(fd, &kregs, sizeof(struct kvm_regs));
-    if (nbytes < 0) {
-        warn("savevm: Error writing kvm_regs");
-        return -1;
+    if(save_in_memory_flag) {
+        memcpy(shm_ptr+shm_ptr_offset, &kregs, sizeof(struct kvm_regs));
+        shm_ptr_offset += sizeof(struct kvm_regs);
     }
-    else if (nbytes != sizeof(struct kvm_regs)) {
-        warnx("savevm: Short write() writing kvm_regs: %zd", nbytes);
-        return -1;
+    else {
+        nbytes = write(fd, &kregs, sizeof(struct kvm_regs));
+        if (nbytes < 0) {
+            warn("savevm: Error writing kvm_regs");
+            return -1;
+        }
+        else if (nbytes != sizeof(struct kvm_regs)) {
+            warnx("savevm: Short write() writing kvm_regs: %zd", nbytes);
+            return -1;
+        }
+    }
+    if(save_in_memory_flag) {
+        memcpy(shm_ptr+shm_ptr_offset, &sregs, sizeof(struct kvm_sregs));
+        shm_ptr_offset += sizeof(struct kvm_sregs);
+    }
+    else {
+        nbytes = write(fd, &sregs, sizeof(struct kvm_sregs));
+        if (nbytes < 0) {
+            warn("savevm: Error writing kvm_sregs");
+            return -1;
+        }
+        else if (nbytes != sizeof(struct kvm_sregs)) {
+            warnx("savevm: Short write() writing kvm_sregs: %zd", nbytes);
+            return -1;
+        }
     }
 
-    nbytes = write(fd, &sregs, sizeof(struct kvm_sregs));
-    if (nbytes < 0) {
-        warn("savevm: Error writing kvm_sregs");
-        return -1;
+    if(save_in_memory_flag) {
+        memcpy(shm_ptr+shm_ptr_offset, &msr_data, sizeof(msr_data));
+        shm_ptr_offset += sizeof(msr_data);
     }
-    else if (nbytes != sizeof(struct kvm_sregs)) {
-        warnx("savevm: Short write() writing kvm_sregs: %zd", nbytes);
-        return -1;
-    }
-
-    nbytes = write(fd, &msr_data, sizeof(msr_data));
-    if (nbytes < 0) {
-        warn("savevm: Error writing kvm_regs");
-        return -1;
-    }
-    else if (nbytes != sizeof(msr_data)) {
-        warnx("savevm: Short write() writing msr_data: %zd", nbytes);
-        return -1;
+    else {
+        nbytes = write(fd, &msr_data, sizeof(msr_data));
+        if (nbytes < 0) {
+            warn("savevm: Error writing kvm_regs");
+            return -1;
+        }
+        else if (nbytes != sizeof(msr_data)) {
+            warnx("savevm: Short write() writing msr_data: %zd", nbytes);
+            return -1;
+        }
     }
 
     page_size = sysconf(_SC_PAGESIZE);
@@ -460,22 +504,38 @@ long savevm(struct ukvm_hv *hv)
         warn("savevm: mincore() failed");
         return -1;
     }
-    nbytes = write(fd, &page_size, sizeof(long));
-    if (nbytes == -1) {
-        warn("savevm: Error writing page size");
-        free(mvec);
-        return -1;
-    } else if (nbytes != sizeof(long)) {
-        warnx("savevm: Short write in page size");
-        free(mvec);
-        return -1;
+
+    if(save_in_memory_flag) {
+        memcpy(shm_ptr+shm_ptr_offset, &page_size, sizeof(long));
+        shm_ptr_offset += sizeof(long);
     }
-    num_pgs_off = lseek(fd, 0, SEEK_CUR);
-    file_off = num_pgs_off + sizeof(size_t);
-    if (lseek(fd, file_off, SEEK_SET) != file_off) {
-        warnx("savevm: Could not set file offset");
-        free(mvec);
-        return -1;
+    else {
+        nbytes = write(fd, &page_size, sizeof(long));
+        if (nbytes == -1) {
+            warn("savevm: Error writing page size");
+            free(mvec);
+            return -1;
+        } else if (nbytes != sizeof(long)) {
+            warnx("savevm: Short write in page size");
+            free(mvec);
+            return -1;
+        }
+    }
+
+    off_t num_pgs_ptr_offset = 0;
+    if(save_in_memory_flag) {
+        // reserve a pointer instead of lseek()
+        num_pgs_ptr_offset = shm_ptr_offset;
+        shm_ptr_offset += sizeof(size_t);
+    }
+    else {
+        num_pgs_off = lseek(fd, 0, SEEK_CUR);
+        file_off = num_pgs_off + sizeof(size_t);
+        if (lseek(fd, file_off, SEEK_SET) != file_off) {
+            warnx("savevm: Could not set file offset");
+            free(mvec);
+            return -1;
+        }
     }
 
     // struct timespec start, end;
@@ -483,28 +543,43 @@ long savevm(struct ukvm_hv *hv)
     for (size_t pg = 0; pg < npages; pg++) {
         if (mvec[pg] & 1) {
             off_t pgoff = (pg * page_size);
-            ssize_t nbytes = write(fd, &pg, sizeof(size_t));
-            if (nbytes == -1) {
-                warn("savevm: Error dumping guest memory page %zd", pg);
-                free(mvec);
-                return -1;
-            } else if (nbytes != sizeof(size_t)) {
-                warnx("savevm: Short write dumping guest memory page"
-                        "%zd: %zd bytes", pg, nbytes);
-                free(mvec);
-                return -1;
+
+            if(save_in_memory_flag) {
+                memcpy(shm_ptr+shm_ptr_offset, &pg, sizeof(size_t));
+                shm_ptr_offset += sizeof(size_t);
             }
-            nbytes = write(fd, hv->mem + pgoff, page_size);
-            if (nbytes == -1) {
-                warn("savevm: Error dumping guest memory page %zd", pg);
-                free(mvec);
-                return -1;
-            } else if (nbytes != page_size) {
-                warnx("savevm: Short write dumping guest memory page"
-                        "%zd: %zd bytes", pg, nbytes);
-                free(mvec);
-                return -1;
+            else {
+                ssize_t nbytes = write(fd, &pg, sizeof(size_t));
+                if (nbytes == -1) {
+                    warn("savevm: Error dumping guest memory page %zd", pg);
+                    free(mvec);
+                    return -1;
+                } else if (nbytes != sizeof(size_t)) {
+                    warnx("savevm: Short write dumping guest memory page"
+                            "%zd: %zd bytes", pg, nbytes);
+                    free(mvec);
+                    return -1;
+                }
             }
+
+            if(save_in_memory_flag) {
+                memcpy(shm_ptr+shm_ptr_offset, hv->mem + pgoff, page_size);
+                shm_ptr_offset += page_size;
+            }
+            else {
+                nbytes = write(fd, hv->mem + pgoff, page_size);
+                if (nbytes == -1) {
+                    warn("savevm: Error dumping guest memory page %zd", pg);
+                    free(mvec);
+                    return -1;
+                } else if (nbytes != page_size) {
+                    warnx("savevm: Short write dumping guest memory page"
+                            "%zd: %zd bytes", pg, nbytes);
+                    free(mvec);
+                    return -1;
+                }
+            }
+
             ndumped++;
         }
     }
@@ -514,21 +589,33 @@ long savevm(struct ukvm_hv *hv)
     // double savevm_page_time  = (double)(end.tv_sec - start.tv_sec) + ((double)(end.tv_nsec - start.tv_nsec) / 1000000000L);
     long savevm_page_bytes = (ndumped * page_size);
 
-    nbytes = pwrite(fd, &ndumped, sizeof(size_t), num_pgs_off);
-    if (nbytes == -1) {
-        warn("savevm: Error writing total saved pages %zd", ndumped);
-        return -1;
-    } else if (nbytes != sizeof(size_t)) {
-        warnx("savevm: Short write on total saved pages"
-                " %zd: %zd bytes", ndumped, nbytes);
-        return -1;
+    if(save_in_memory_flag) {
+        memcpy(shm_ptr+num_pgs_ptr_offset, &ndumped, sizeof(size_t));
+    }
+    else {
+        nbytes = pwrite(fd, &ndumped, sizeof(size_t), num_pgs_off);
+        if (nbytes == -1) {
+            warn("savevm: Error writing total saved pages %zd", ndumped);
+            return -1;
+        } else if (nbytes != sizeof(size_t)) {
+            warnx("savevm: Short write on total saved pages"
+                    " %zd: %zd bytes", ndumped, nbytes);
+            return -1;
+        }
     }
 
-    // Ensure the snapshot is written back to the storage device
-    if (fsync(fd) == -1)
-    {
-        warn("fsync: fail to sync the saved snapshot");
-        return -1;
+    if(save_in_memory_flag) {
+        savevm_offset = shm_ptr_offset;
+        munmap(shm_ptr, SHM_SIZE);
+        printf("savevm(): offset: %ld\n", savevm_offset);
+    }
+    else {
+        // Ensure the snapshot is written back to the storage device
+        if (fsync(fd) == -1)
+        {
+            warn("fsync: fail to sync the saved snapshot");
+            return -1;
+        }
     }
 
     close(fd);
@@ -549,13 +636,32 @@ long loadvm(char *load_file, struct ukvm_hv *hv)
         struct kvm_msr_entry entries[1];
     } msr_data = {};
 
-    // TODO: 
-    // This is not using O_DIRECT option, so the loadvm performance is affected by OS page caches. 
-    // Clear the page cache to avoid the unexpected speedup: sudo sh -c "sync; echo 3 > /proc/sys/vm/drop_caches" 
-    fd = open(load_file, O_RDONLY);
-    if (fd < 0) {
-        warn("loadvm: open(%s)", load_file);
-        return -1;
+    char* shm_ptr = NULL;
+    off_t shm_ptr_offset = 0;
+    if(save_in_memory_flag) {
+        fd = shm_open(load_file, O_RDONLY, 0666);
+        if (fd < 0) {
+            warn("loadvm: open(%s)", load_file);
+            return -1;
+        }
+        printf("loadvm: file %s is open. \n", load_file);
+
+        // if(ftruncate(fd, SHM_SIZE) == -1) {
+        //     warn("loadvm: ftruncate(%s)", save_file);
+        //     return -1;
+        // }
+        shm_ptr = mmap(0, SHM_SIZE, PROT_READ, MAP_SHARED, fd, 0);
+    }
+    else {
+        /* 
+         * TODO: This is not using O_DIRECT option, so the loadvm performance is affected by OS page caches.                 
+         * Clear the page cache to avoid the unexpected speedup: sudo sh -c "sync; echo 3 > /proc/sys/vm/drop_caches"  
+         */
+        fd = open(load_file, O_RDONLY);
+        if (fd < 0) {
+            warn("loadvm: open(%s)", load_file);
+            return -1;
+        }
     }
 
     ukvm_x86_setup_gdt(hv->mem);
@@ -563,25 +669,43 @@ long loadvm(char *load_file, struct ukvm_hv *hv)
 
     setup_cpuid(hvb);
 
-    ret = read(fd, &kregs, sizeof(struct kvm_regs));
-    if (ret < sizeof(struct kvm_regs)) {
-        if (ret < 0)
-            warnx("Could not read kregs");
-        warnx("Incomplete read of kregs\n");
+    if(save_in_memory_flag) {
+        memcpy(&kregs, shm_ptr+shm_ptr_offset, sizeof(struct kvm_regs));
+        shm_ptr_offset += sizeof(struct kvm_regs);
+    }
+    else {
+        ret = read(fd, &kregs, sizeof(struct kvm_regs));
+        if (ret < sizeof(struct kvm_regs)) {
+            if (ret < 0)
+                warnx("Could not read kregs");
+            warnx("Incomplete read of kregs\n");
+        }
     }
 
-    ret = read(fd, &sregs, sizeof(struct kvm_sregs));
-    if (ret < sizeof(struct kvm_sregs)) {
-        if (ret < 0)
-            warnx("Could not read sregs");
-        warnx("Incomplete read of sregs\n");
+    if(save_in_memory_flag) {
+        memcpy(&sregs, shm_ptr+shm_ptr_offset, sizeof(struct kvm_sregs));
+        shm_ptr_offset += sizeof(struct kvm_sregs);
+    }
+    else {
+        ret = read(fd, &sregs, sizeof(struct kvm_sregs));
+        if (ret < sizeof(struct kvm_sregs)) {
+            if (ret < 0)
+                warnx("Could not read sregs");
+            warnx("Incomplete read of sregs\n");
+        }
     }
 
-    ret = read(fd, &msr_data, sizeof(msr_data));
-    if (ret < sizeof(msr_data)) {
-        if (ret < 0)
-            warnx("Could not read msr_data");
-        warnx("Incomplete read of msr_data\n");
+    if(save_in_memory_flag) {
+        memcpy(&msr_data, shm_ptr+shm_ptr_offset, sizeof(msr_data));
+        shm_ptr_offset += sizeof(msr_data);
+    }
+    else {
+        ret = read(fd, &msr_data, sizeof(msr_data));
+        if (ret < sizeof(msr_data)) {
+            if (ret < 0)
+                warnx("Could not read msr_data");
+            warnx("Incomplete read of msr_data\n");
+        }
     }
 
     ret = ioctl(hvb->vcpufd, KVM_SET_SREGS, &sregs);
@@ -596,17 +720,30 @@ long loadvm(char *load_file, struct ukvm_hv *hv)
     if (ret == -1)
         err(1, "loadvm: KVM ioctl (SET_MSRS) failed");
 
-    ret = read(fd, &page_size, sizeof(long));
-    if (ret < sizeof(long)) {
-        if (ret < 0)
-            warnx("Could not read pge_size");
-        warnx("Incomplete read of page_size\n");
+    if(save_in_memory_flag) {
+        memcpy(&page_size, shm_ptr+shm_ptr_offset, sizeof(long));
+        shm_ptr_offset += sizeof(long);
     }
-    ret = read(fd, &total_pgs, sizeof(size_t));
-    if (ret < sizeof(size_t)) {
-        if (ret < 0)
-            warnx("Could not read total pages number");
-        warnx("Incomplete read of page_size\n");
+    else {
+        ret = read(fd, &page_size, sizeof(long));
+        if (ret < sizeof(long)) {
+            if (ret < 0)
+                warnx("Could not read pge_size");
+            warnx("Incomplete read of page_size\n");
+        }
+    }
+
+    if(save_in_memory_flag) {
+        memcpy(&total_pgs, shm_ptr+shm_ptr_offset, sizeof(size_t));
+        shm_ptr_offset += sizeof(size_t);
+    }
+    else {
+        ret = read(fd, &total_pgs, sizeof(size_t));
+        if (ret < sizeof(size_t)) {
+            if (ret < 0)
+                warnx("Could not read total pages number");
+            warnx("Incomplete read of page_size\n");
+        }
     }
 
     struct timespec start, end;
@@ -615,24 +752,39 @@ long loadvm(char *load_file, struct ukvm_hv *hv)
     for(int i = 0; i < total_pgs; i++) {
         off_t pgoff;
         size_t pg;
-        ssize_t nbytes = read(fd, &pg, sizeof(size_t));
-        if (nbytes == -1) {
-            warn("loadvm: Error reading offset of guest memory page %zd", pg);
-            return -1;
-        } else if (nbytes != sizeof(size_t)) {
-            warnx("loadvm: Short read on guest memory page "
-                    "%zd: %zd bytes", pg, nbytes);
-        return -1;
+        ssize_t nbytes;
+
+        if(save_in_memory_flag) {
+            memcpy(&pg, shm_ptr+shm_ptr_offset, sizeof(size_t));
+            shm_ptr_offset += sizeof(size_t);
+        }
+        else {
+            nbytes = read(fd, &pg, sizeof(size_t));
+            if (nbytes == -1) {
+                warn("loadvm: Error reading offset of guest memory page %zd", pg);
+                return -1;
+            } else if (nbytes != sizeof(size_t)) {
+                warnx("loadvm: Short read on guest memory page "
+                        "%zd: %zd bytes", pg, nbytes);
+                return -1;
+            }
         }
         pgoff = (pg * page_size);
-        nbytes = read(fd, hv->mem + pgoff, page_size);
-        if (nbytes == -1) {
-            warn("loadvm: Error reading guest memory page %zd", pg);
-            return -1;
-        } else if (nbytes != page_size) {
-            warnx("loadvm: Short read on guest memory page "
-                    "%zd: %zd bytes", pg, nbytes);
-            break;
+
+        if(save_in_memory_flag) {
+            memcpy(hv->mem + pgoff, shm_ptr+shm_ptr_offset, page_size);
+            shm_ptr_offset += page_size;
+        }
+        else {
+            nbytes = read(fd, hv->mem + pgoff, page_size);
+            if (nbytes == -1) {
+                warn("loadvm: Error reading guest memory page %zd", pg);
+                return -1;
+            } else if (nbytes != page_size) {
+                warnx("loadvm: Short read on guest memory page "
+                        "%zd: %zd bytes", pg, nbytes);
+                break;
+            }
         }
     }
     // warnx("loadvm: loaded %ld pages with page size %ld", total_pgs, page_size);
@@ -645,7 +797,14 @@ long loadvm(char *load_file, struct ukvm_hv *hv)
 
     // printf("loadvm (load pages only), %.9lf, sec, %.3lf, MiB\n", (double)(end.tv_sec - start.tv_sec) + ((double)(end.tv_nsec - start.tv_nsec) / 1000000000L), (total_pgs * page_size) / (double) (1024*1024) );
 
-    off_t offset = lseek(fd, 0, SEEK_CUR);
+    off_t offset=0;
+    if(save_in_memory_flag) {
+        offset = shm_ptr_offset;
+        munmap(shm_ptr, SHM_SIZE);
+    }
+    else {
+        offset = lseek(fd, 0, SEEK_CUR);
+    }
 
     close(fd);
     return offset;
@@ -695,61 +854,114 @@ void savefpga(struct ukvm_hv *hv)
     }
 
     /* open file */
-    int fd = open(save_file, O_WRONLY, S_IRUSR | S_IWUSR);
-    if (fd < 0) {
-        warn("savefpga(): open(%s)", save_file);
-        return;
+    int fd;
+    off_t offset;
+    char* shm_ptr = NULL;
+    off_t shm_ptr_offset = savevm_offset;
+    if(save_in_memory_flag) {
+        fd = shm_open(save_file, O_RDWR, 0666);
+        // if(ftruncate(fd, SHM_SIZE) == -1) {
+        //     warn("savevm: ftruncate(%s)", save_file);
+        //     return;
+        // }
+        shm_ptr = mmap(0, SHM_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
     }
-    off_t offset = lseek(fd, 0, SEEK_END);
-    warnx("savefpga(): file is seeked to %lu\n", offset);
+    else {
+        fd = open(save_file, O_WRONLY, S_IRUSR | S_IWUSR);
+        if (fd < 0) {
+            warn("savefpga(): open(%s)", save_file);
+            return;
+        }
+        offset = lseek(fd, 0, SEEK_END);
+        warnx("savefpga(): file is seeked to %lu\n", offset);
+    }
 
     /* write FPGA data header */
-    size_t nbytes = write(fd, &header, sizeof(struct fpga_data_header));
-    if (nbytes < 0) {
-        warn("savefpga(): Error writing fpga_data_header");
-        return;
+    size_t nbytes = 0;
+    if(save_in_memory_flag) {
+        memcpy(shm_ptr+shm_ptr_offset, &header, sizeof(struct fpga_data_header));
+        shm_ptr_offset += sizeof(struct fpga_data_header);
+        nbytes += sizeof(struct fpga_data_header);
+    }
+    else {
+        nbytes = write(fd, &header, sizeof(struct fpga_data_header));
+        if (nbytes < 0) {
+            warn("savefpga(): Error writing fpga_data_header");
+            return;
+        }
     }
 
     /* write FPGA thread info */
     if(state_flag) {
-	    warn("write state_msg\n");
-        nbytes = write(fd, state_msg.data, sizeof(struct fpga_thr_info));
-        if (nbytes < 0) {
-            warn("savefpga(): Error writing fpga_thr_info");
-            return;
+	      warn("write state_msg\n");
+        if(save_in_memory_flag) {
+            memcpy(shm_ptr+shm_ptr_offset, state_msg.data, sizeof(struct fpga_thr_info));
+            shm_ptr_offset += sizeof(struct fpga_thr_info);
+            nbytes += sizeof(struct fpga_thr_info);
+        }
+        else {
+            nbytes = write(fd, state_msg.data, sizeof(struct fpga_thr_info));
+            if (nbytes < 0) {
+                warn("savefpga(): Error writing fpga_thr_info");
+                return;
+            }
         }
     } else if (thr_info != NULL) {
-	    warn("write thr_info\n");
-        nbytes = write(fd, thr_info, sizeof(struct fpga_thr_info));
-        if (nbytes < 0) {
-            warn("savefpga(): Error writing fpga_thr_info");
-            return;
+	      warn("write thr_info\n");
+        if(save_in_memory_flag) {
+            memcpy(shm_ptr+shm_ptr_offset, thr_info, sizeof(struct fpga_thr_info));
+            shm_ptr_offset += sizeof(struct fpga_thr_info);
+            nbytes += sizeof(struct fpga_thr_info);
+        }
+        else {
+            nbytes = write(fd, thr_info, sizeof(struct fpga_thr_info));
+            if (nbytes < 0) {
+                warn("savefpga(): Error writing fpga_thr_info");
+                return;
+            }
         }
     }
 
     /* write FPGA data */
     if(data_flag) {
-	    warn("write data_msg\n");
-        nbytes = write(fd, data_msg.data, data_msg.size);
-        if (nbytes < 0) {
-            warn("savefpga(): Error writing fpga_data");
-            return;
+	      warn("write data_msg\n");
+        if(save_in_memory_flag) {
+            memcpy(shm_ptr+shm_ptr_offset, data_msg.data, data_msg.size);
+            shm_ptr_offset += data_msg.size;
+            nbytes += data_msg.size;
         }
-    } else if (thr_info != NULL) {
-	if (thr_info->mig_data != NULL) {
-	    warn("write mig_data\n");
-            nbytes = write(fd, thr_info->mig_data, thr_info->mig_size);
+        else {
+            nbytes = write(fd, data_msg.data, data_msg.size);
             if (nbytes < 0) {
                 warn("savefpga(): Error writing fpga_data");
                 return;
             }
-	}
+        }
+    } else if (thr_info != NULL) {
+	      if (thr_info->mig_data != NULL) {
+	          warn("write mig_data\n");
+            if(save_in_memory_flag) {
+                memcpy(shm_ptr+shm_ptr_offset, thr_info->mig_data, thr_info->mig_size);
+                shm_ptr_offset += thr_info->mig_size;
+                nbytes += thr_info->mig_size;
+            }
+            else {
+                nbytes = write(fd, thr_info->mig_data, thr_info->mig_size);
+                if (nbytes < 0) {
+                    warn("savefpga(): Error writing fpga_data");
+                    return;
+                }
+            }
+	      }
     }
 
     if(state_flag)
         destroy_fpga_worker();
     else
         warn("savefpga(): Worker doesn't exist. \n");
+
+    if(save_in_memory_flag)
+        munmap(shm_ptr, SHM_SIZE);
 
     close(fd);
     return;
@@ -763,31 +975,60 @@ void savefpga(struct ukvm_hv *hv)
  */
 void loadfpga(char *load_file, long offset, struct ukvm_hv *hv)
 {
-    int fd = open(load_file, O_RDONLY);
-    if (fd < 0) {
-        warn("loadfpga(): open(%s)", load_file);
-        return;
-    }
+    /* open file */
+    int fd;
+    char* shm_ptr = NULL;
+    off_t shm_ptr_offset = offset;
 
-    lseek(fd, offset, SEEK_SET);
+    if(save_in_memory_flag) {
+        fd = shm_open(load_file, O_RDONLY, 0666);
+        // if(ftruncate(fd, SHM_SIZE) == -1) {
+        //     warn("loadfpga: ftruncate(%s)", save_file);
+        //     return;
+        // }
+        shm_ptr = mmap(0, SHM_SIZE, PROT_READ, MAP_SHARED, fd, 0);
+    }
+    else {
+        fd = open(load_file, O_RDONLY);
+        if (fd < 0) {
+            warn("loadfpga(): open(%s)", load_file);
+            return;
+        }
+
+        lseek(fd, offset, SEEK_SET);
+        warnx("loadfpga(): file is seeked to %lu\n", offset);
+    }
 
     /* read FPGA data header */
     struct fpga_data_header header;
-    int ret = read(fd, &header, sizeof(struct fpga_data_header));
-    if (ret < sizeof(struct fpga_data_header)) {
-        if (ret < 0)
-            warnx("Could not read fpga data header");
-        warnx("Incomplete read of fpga data header\n");
+    int ret;
+    if(save_in_memory_flag) {
+        memcpy(&header, shm_ptr+shm_ptr_offset, sizeof(struct fpga_data_header));
+        shm_ptr_offset += sizeof(struct fpga_data_header);
+    }
+    else {
+        ret = read(fd, &header, sizeof(struct fpga_data_header));
+        if (ret < sizeof(struct fpga_data_header)) {
+            if (ret < 0)
+                warnx("Could not read fpga data header");
+            warnx("Incomplete read of fpga data header\n");
+        }
     }
 
     /* read FPGA thread info */
     struct fpga_thr_info thr_info;
     if(header.sb_fpgainit) {
-        ret = read(fd, &thr_info, sizeof(struct fpga_thr_info));
-        if (ret < sizeof(struct fpga_thr_info)) {
-            if (ret < 0)
-                warnx("Could not read fpga thr info");
-            warnx("Incomplete read of fpga thr info\n");
+        if(save_in_memory_flag) {
+            memcpy(&thr_info, shm_ptr+shm_ptr_offset, sizeof(struct fpga_thr_info));
+            shm_ptr_offset += sizeof(struct fpga_thr_info);
+        }
+        else {
+            ret = read(fd, &thr_info, sizeof(struct fpga_thr_info));
+            if (ret < sizeof(struct fpga_thr_info)) {
+                if (ret < 0)
+                    warnx("Could not read fpga thr info");
+                warnx("Incomplete read of fpga thr info\n");
+            }
         }
 
         thr_info.hv = hv;
@@ -802,11 +1043,17 @@ void loadfpga(char *load_file, long offset, struct ukvm_hv *hv)
         size_t data_size = header.data_size;
         void* fpga_data = malloc(data_size);
 
-        ret = read(fd, fpga_data, data_size);
-        if (ret < data_size) {
-            if (ret < 0)
-                warnx("Could not read fpga thr info");
-            warnx("Incomplete read of fpga thr info\n");
+        if(save_in_memory_flag) {
+            memcpy(fpga_data, shm_ptr+shm_ptr_offset, data_size);
+            shm_ptr_offset += data_size;
+        }
+        else {
+            ret = read(fd, fpga_data, data_size);
+            if (ret < data_size) {
+                if (ret < 0)
+                    warnx("Could not read fpga thr info");
+                warnx("Incomplete read of fpga thr info\n");
+            }
         }
 
         thr_info.mig_data = fpga_data;
@@ -818,6 +1065,11 @@ void loadfpga(char *load_file, long offset, struct ukvm_hv *hv)
         create_fpga_worker(thr_info);
     else
         warnx("loadfpga(): Worker is not created. \n");
+
+    if(save_in_memory_flag) {
+        munmap(shm_ptr, SHM_SIZE);
+        // shm_unlink(load_file);
+    }
 
     close(fd);
     return;

@@ -30,6 +30,8 @@
 
 #include <inttypes.h>
 #include <err.h>
+#include <stdbool.h>
+#include <sys/types.h>
 
 #include "ukvm_cc.h"
 #define UKVM_HOST
@@ -49,6 +51,13 @@
  * 2 - it should resume
  */
 extern int vm_state;
+
+/*
+ * a flag to switch where VM snapshots are saved
+ * true - save VM snapshots into shared memory buffers
+ * false - save them into persistent storage (e.g., SSD)
+ */
+extern bool save_in_memory_flag;
 
 /*
  *  linked list of addresses that permissions are changed during
@@ -273,12 +282,11 @@ long savevm(struct ukvm_hv *hv);
  */
 long loadvm(char *load_file, struct ukvm_hv *hv);
 
-
 void savefpga(struct ukvm_hv *hv);
-
 
 void loadfpga(char *load_file, long offset, struct ukvm_hv *hv);
 
+void enable_inmem_buffer();
 
 void setup_cpuid(struct ukvm_hvb *hvb);
 #endif /* UKVM_H */

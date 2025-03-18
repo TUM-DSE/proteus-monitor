@@ -19,6 +19,6 @@
 UKVM_TARGETS=test_globals.ukvm ukvm-bin
 VIRTIO_TARGETS=test_globals.virtio
 MUEN_TARGETS=test_globals.muen
-UKVM_MODULES=
+UKVM_MODULES=fpga
 
 include ../Makefile.tests
