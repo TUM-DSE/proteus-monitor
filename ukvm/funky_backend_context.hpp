@@ -211,9 +211,10 @@ namespace funky_backend {
       std::unique_ptr<cl::Program> program;
       std::map<int, cl::CommandQueue> queues;
 
-      // The kernels and their arguments are saved and loaded during migration
+      // the kernels and their arguments are saved and loaded during migration
       std::map<const char*, cl::Kernel> kernels;
-      // Same indices as `buffers` below
+      // using mem_id as index like `buffers` below, currently only the arguments of the last kernel
+      // that was created are saved
       std::map<int, funky_msg::arg_info> kernel_args;
 
       // memory obj
@@ -318,6 +319,7 @@ namespace funky_backend {
           // if the same kernel already exists, skip the creation and use the existing one. 
           DEBUG_STREAM("The specified kernel " << kernel_name << " is found. Nothing is done here. ");
 
+          // delete the arguments from the previous kernel if there was one
           kernel_args.clear();
         }
 
@@ -349,6 +351,7 @@ namespace funky_backend {
             buffer_onfpga_flags[arg->mem_id] = true;
           }
 
+          // save arg for migration
           auto arg_copy = *arg;
           kernel_args.emplace(arg_copy.mem_id, arg_copy);
         }
@@ -698,6 +701,8 @@ namespace funky_backend {
             auto name = it.first;
             std::strncpy(kheader.name, name, sizeof(kheader.name));
             kheader.name[sizeof(kheader.name) - 1] = '\0';
+            // all other kernels except the first are ignored,
+            // should suffice for migration microbenchmarks
             break;
           }
           kheader.num_args = kernel_args.size();
@@ -747,7 +752,8 @@ namespace funky_backend {
           }
 
           DEBUG_STREAM("saved file size: " << total_size << " Bytes.");
-          DEBUG_STREAM("event num: " << event_num << ", memobj num: " << mig_save_data.size()); 
+          DEBUG_STREAM("event num: " << event_num << ", memobj num: " << headers.size());
+          DEBUG_STREAM("kernel: " << kheader.name << ", num kernel args: " << kheader.num_args);
           return mig_save_data;
         }
 
@@ -768,7 +774,7 @@ namespace funky_backend {
             current_ptr += sizeof(struct eventobj_header);
 
             migrated_events.emplace(eh.event_id, eh);
-            DEBUG_STREAM("event (id: " << eh.event_id << "is loaded.");
+            DEBUG_STREAM("event (id: " << eh.event_id << ") is loaded.");
             event_num--;
           }
 
@@ -776,6 +782,7 @@ namespace funky_backend {
           kernel_header kheader;
           std::memcpy(&kheader, current_ptr, sizeof(kheader));
           current_ptr += sizeof(kheader);
+          DEBUG_STREAM("Loaded kernel name " << kheader.name);
 
           std::map<int, funky_msg::arg_info> kargs;
           for (int i = 0; i < kheader.num_args; i++) {
@@ -784,6 +791,7 @@ namespace funky_backend {
             current_ptr += sizeof(funky_msg::arg_info);
             kargs.emplace(arg.mem_id, arg);
           }
+          DEBUG_STREAM("Loaded " << kheader.num_args << " kernel args");
 
           create_kernel(kheader.name);
 
@@ -802,6 +810,7 @@ namespace funky_backend {
             memobj_header h;
             std::memcpy(&h, current_ptr, sizeof(h));
             current_ptr += sizeof(h);
+            DEBUG_STREAM("Loaded memobj with mem_id " << h.mem_id);
 
             void* host_ptr = UKVM_CHECKED_GPA_P(hv, h.gpa, h.mem_size);
             create_buffer(h.mem_id, h.mem_flags, h.mem_size, host_ptr, (void *)h.gpa);
