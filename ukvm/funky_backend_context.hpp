@@ -44,6 +44,12 @@ namespace funky_backend {
         cl_ulong profiling_info[5];
       };
 
+      struct kernel_header
+      {
+        char name[32];
+        int num_args;
+      };
+
 
     protected:
       buffer::Reader<funky_msg::request>  request_q;
@@ -205,8 +211,10 @@ namespace funky_backend {
       std::unique_ptr<cl::Program> program;
       std::map<int, cl::CommandQueue> queues;
 
-      // TODO: kernels that have been initialized once will be reused in the future? If not, we don't need to keep them here
+      // The kernels and their arguments are saved and loaded during migration
       std::map<const char*, cl::Kernel> kernels;
+      // Same indices as `buffers` below
+      std::map<int, funky_msg::arg_info> kernel_args;
 
       // memory obj
       // TODO: consider cl::Pipe, cl::Image
@@ -309,6 +317,8 @@ namespace funky_backend {
 
           // if the same kernel already exists, skip the creation and use the existing one. 
           DEBUG_STREAM("The specified kernel " << kernel_name << " is found. Nothing is done here. ");
+
+          kernel_args.clear();
         }
 
         /**
@@ -338,6 +348,9 @@ namespace funky_backend {
             /* Memory objects specified as kernel arguments must be on FPGA */
             buffer_onfpga_flags[arg->mem_id] = true;
           }
+
+          auto arg_copy = *arg;
+          kernel_args.emplace(arg_copy.mem_id, arg_copy);
         }
 
         /**
@@ -676,7 +689,19 @@ namespace funky_backend {
               total_size += header.mem_size;
             }
           }
-          
+
+          total_size += sizeof(kernel_header);
+          total_size += sizeof(funky_msg::arg_info) * kernel_args.size();
+
+          kernel_header kheader;
+          for (auto it: kernels) {
+            auto name = it.first;
+            std::strncpy(kheader.name, name, sizeof(kheader.name));
+            kheader.name[sizeof(kheader.name) - 1] = '\0';
+            break;
+          }
+          kheader.num_args = kernel_args.size();
+
           /* sync FPGA */
           queues[0].finish();
 
@@ -692,6 +717,16 @@ namespace funky_backend {
             /* copy header */
             std::memcpy((void*)mig_data_ptr, (void*)&eheader, sizeof(struct eventobj_header));
             mig_data_ptr += sizeof(struct eventobj_header);
+          }
+
+          /* save kernel data */
+          std::memcpy(mig_data_ptr, &kheader, sizeof(kheader));
+          mig_data_ptr += sizeof(kheader);
+
+          for (auto& it: kernel_args) {
+            auto arg = it.second;
+            std::memcpy(mig_data_ptr, &arg, sizeof(arg));
+            mig_data_ptr += sizeof(arg);
           }
 
           /* save memobj */
@@ -737,28 +772,57 @@ namespace funky_backend {
             event_num--;
           }
 
+          /* load kernel data */
+          kernel_header kheader;
+          std::memcpy(&kheader, current_ptr, sizeof(kheader));
+          current_ptr += sizeof(kheader);
+
+          std::map<int, funky_msg::arg_info> kargs;
+          for (int i = 0; i < kheader.num_args; i++) {
+            funky_msg::arg_info arg{0, 0};
+            std::memcpy(&arg, current_ptr, sizeof(funky_msg::arg_info));
+            current_ptr += sizeof(funky_msg::arg_info);
+            kargs.emplace(arg.mem_id, arg);
+          }
+
+          create_kernel(kheader.name);
+
+          /* set scalar args (mem_id < 0) that don't depend on buffers */
+          for (auto it: kargs) {
+            auto arg = it.second;
+            if (arg.mem_id < 0) {
+              void* src = UKVM_CHECKED_GPA_P(hv, (ukvm_gpa_t)arg.src, arg.size);
+              set_arg(kheader.name, &arg, src);
+            }
+          }
+
           /* load memobj */
           while(current_ptr < end_ptr)
           {
-            auto h = (struct memobj_header*) current_ptr;
-            current_ptr += sizeof(struct memobj_header);
+            memobj_header h;
+            std::memcpy(&h, current_ptr, sizeof(h));
+            current_ptr += sizeof(h);
 
-            void* host_ptr = UKVM_CHECKED_GPA_P(hv, h->gpa, h->mem_size);
-            create_buffer(h->mem_id, h->mem_flags, h->mem_size, host_ptr, (void *)h->gpa);
+            void* host_ptr = UKVM_CHECKED_GPA_P(hv, h.gpa, h.mem_size);
+            create_buffer(h.mem_id, h.mem_flags, h.mem_size, host_ptr, (void *)h.gpa);
+
+            /* set kernel args so the OpenCL runtime knows which memory bank which buffer belongs to */
+            auto arg = kargs.at(h.mem_id);
+            set_arg(kheader.name, &arg, nullptr);
 
             /* write memobj back into FPGA memory */
-            if(h->onfpga_flag) 
+            if(h.onfpga_flag)
             {
               cl_int err;
               /* load data from a host-side buffer in guest memory */
-              if(h->mem_flags & CL_MEM_USE_HOST_PTR) {
-                OCL_CHECK(err, err = queues[0].enqueueMigrateMemObjects({buffers[h->mem_id]}, 0));
+              if(h.mem_flags & CL_MEM_USE_HOST_PTR) {
+                OCL_CHECK(err, err = queues[0].enqueueMigrateMemObjects({buffers[h.mem_id]}, 0));
               }
               /* load data from a migration file */
               else {
-                OCL_CHECK(err, err = queues[0].enqueueWriteBuffer(buffers[h->mem_id], 
-                      CL_TRUE, 0, h->mem_size, current_ptr, nullptr, nullptr));
-                current_ptr += h->mem_size;
+                OCL_CHECK(err, err = queues[0].enqueueWriteBuffer(buffers[h.mem_id],
+                      CL_TRUE, 0, h.mem_size, current_ptr, nullptr, nullptr));
+                current_ptr += h.mem_size;
               }
             }
 
