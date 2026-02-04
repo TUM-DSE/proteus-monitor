@@ -148,7 +148,7 @@ static void transmit_mig_file(int id)
 
 	memcpy(&addr.sin_addr, &to_node, sizeof(struct in_addr));
 	addr.sin_family = AF_INET;
-	addr.sin_port = htons(PORT_NODES+1);
+	addr.sin_port = htons(PORT_NODES+tap_id+1);
 	sockfd = setup_socket(0, (struct sockaddr *) &addr, 0);
 	if (sockfd == -1) {
 		err_print("socket error %d\n", errno);
@@ -333,12 +333,13 @@ static struct ukvm_ps *msg_from_primary(int socket, int *ret)
 		if (!buf)
 			goto ret_1;
 
-		sprintf(ps_ukvm->binary, "/tmp/binary_0.ukvm");
-		sprintf(ps_ukvm->socket, "--mon=/tmp/ukvm0.sock");
+		sprintf(ps_ukvm->binary, "/tmp/binary_%d.ukvm", tap_id);
+		sprintf(ps_ukvm->socket, "--mon=/tmp/ukvm%d.sock", tap_id);
 		ps_ukvm->id = node_com.tsk.id;
-		const char *link_path = "/tmp/bitstream_0.ukvm";
+		char link_path[32];
+		sprintf(link_path, "/tmp/bitstream_%d.ukvm", tap_id);
 		unlink(link_path);
-		if (ps_ukvm->id % 2 == 0) {
+		if (((ps_ukvm->id / 2) % 2) == 0) {
 			const char *target = "/tmp/rosetta_280";
 			if (symlink(target, link_path) != 0) {
 				perror("symlink");
@@ -360,7 +361,9 @@ static struct ukvm_ps *msg_from_primary(int socket, int *ret)
 		if (rc < 0)
 			goto ret_1;
 		// start new task
-		ps_ukvm->pid = start_guest(NULL, ps_ukvm->binary, "--net=tap0",
+		char net_arg[32];
+		sprintf(net_arg, "--net=tap%d", tap_id);
+		ps_ukvm->pid = start_guest(NULL, ps_ukvm->binary, net_arg,
 					   ps_ukvm->socket, args);
 		if (ps_ukvm->pid < 0)
 			goto ret_1;
@@ -620,7 +623,7 @@ int main(int argc, char *argv[])
 	 * Setup socket for communication between daemons (for migration)
 	 */
 	sockaddr.sin_addr.s_addr = htonl(INADDR_ANY);
-	sockaddr.sin_port = htons(PORT_NODES);
+	sockaddr.sin_port = htons(PORT_NODES+tap_id);
 	server_soc = setup_socket(epollfd, (struct sockaddr *) &sockaddr, 1);
 	if (server_soc < 0) {
 		err_print("Could not setup_socket for inter node communication\n");
