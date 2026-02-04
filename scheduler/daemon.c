@@ -29,6 +29,7 @@
 //#define TIME_MIG 1
 
 static struct in_addr to_node;
+int tap_id = 0;
 
 struct ukvm_ps {
 	pid_t pid;
@@ -182,7 +183,7 @@ static int start_guest(const char *mig_arg, const char *guest_bin,
 		char *ukvm_bin = NULL;
 		char out_file[24];
 		char disk_arg[32] = "--disk=";
-		char mem_arg[32] = "--mem=1024";
+		char mem_arg[32] = "--mem=4096";
 
 		strcat(disk_arg, guest_bin);
 		ukvm_bin = getenv("UKVM_BIN");
@@ -215,7 +216,7 @@ static int start_guest(const char *mig_arg, const char *guest_bin,
 				mig_arg, mon_arg, guest_bin, (char *)NULL);
 		else
 			execl(ukvm_bin, ukvm_bin, mem_arg, net_arg, disk_arg,
-				mon_arg, guest_bin, args, (char *)NULL);
+				"--fpga=u280", guest_bin, args, (char *)NULL);
 	} else if (pid == -1) {
 		perror("fork");
 		return -1;
@@ -335,6 +336,22 @@ static struct ukvm_ps *msg_from_primary(int socket, int *ret)
 		sprintf(ps_ukvm->binary, "/tmp/binary_0.ukvm");
 		sprintf(ps_ukvm->socket, "--mon=/tmp/ukvm0.sock");
 		ps_ukvm->id = node_com.tsk.id;
+		const char *link_path = "/tmp/bitstream_0.ukvm";
+		unlink(link_path);
+		if (ps_ukvm->id % 2 == 0) {
+			const char *target = "/tmp/rosetta_50";
+			if (symlink(target, link_path) != 0) {
+				perror("symlink");
+				goto ret_1;
+			}
+		} else {
+			const char *target = "/tmp/vitis_50";
+			if (symlink(target, link_path) != 0) {
+				perror("symlink");
+				goto ret_1;
+			}
+		}
+
 		rc = write_file_n(buf, node_com.tsk.size, ps_ukvm->binary);
 		free(buf);
 		if (rc < 0)
@@ -348,6 +365,7 @@ static struct ukvm_ps *msg_from_primary(int socket, int *ret)
 		if (ps_ukvm->pid < 0)
 			goto ret_1;
 		printf("Started ukvm guest with pid %d\n", ps_ukvm->pid);
+		printf("Started job with id %d and pid %d\n", ps_ukvm->id, ps_ukvm->pid);
 		*ret = 0;
 	} else if (node_com.type == evict) {
 		char *args = NULL;
@@ -438,7 +456,6 @@ static int handle_sigchld(int sigfd, pid_t *p_id)
 		}
 		*p_id = chld;
 
-		printf("My child %d died with code %d\n", chld, sinfo.ssi_status);
 		if (sinfo.ssi_status == 0) {
 			/*
 			 * Successful execution
@@ -453,6 +470,7 @@ static int handle_sigchld(int sigfd, pid_t *p_id)
 			/*
 			 * Task failed
 			 */
+			printf("My child %d died with code %d\n", chld, sinfo.ssi_status);
 			return 5;
 		}
 	}
@@ -483,7 +501,7 @@ static struct ukvm_ps *rcv_start_migrated_guest(int server_soc)
 	sprintf(ps_ukvm->binary, "/tmp/rcvd_file.ukvm");
 	sprintf(ps_ukvm->mig_file, "--load=/tmp/file.mig");
 	sprintf(ps_ukvm->socket, "--mon=/tmp/ukvm1.sock");
-	sprintf(ps_ukvm->net, "--net=tap0");
+	sprintf(ps_ukvm->net, "--net=tap%d", tap_id);
 	/*
 	 * The first file is the binary
 	 * The second file is the migration file
@@ -504,7 +522,7 @@ static struct ukvm_ps *rcv_start_migrated_guest(int server_soc)
 				ps_ukvm->socket, NULL);
 	if (ps_ukvm->pid < 0)
 		goto err_out;
-	printf("Started ukvm guest with pid %d\n", ps_ukvm->pid);
+	//printf("Started ukvm guest with pid %d\n", ps_ukvm->pid);
 
 	close(mig_soc);
 	return ps_ukvm;
@@ -549,7 +567,7 @@ int main(int argc, char *argv[])
 	/*
 	 * Get ip address and port of the primary scheduler
 	 */
-	rc = getopt(argc, argv, "hi:p:");
+	rc = getopt(argc, argv, "hi:p:t:");
 	while (rc != -1) {
 		switch(rc) {
 		case 'h':
@@ -560,6 +578,9 @@ int main(int argc, char *argv[])
 			break;
 		case 'p':
 			port = atoi(optarg);
+			break;
+		case 't':
+			tap_id = atoi(optarg);
 			break;
 		case '?':
 			fprintf(stderr,"Unknown option %c\n", optopt);
@@ -693,7 +714,7 @@ int main(int argc, char *argv[])
 				}
 
 				// report execution result to primary
-				printf("id of task is %d\n", tmp_ups->id);
+				//printf("id of task is %d\n", tmp_ups->id);
 				rc1 = send_deploy_res(sched_sock, rc, tmp_ups->id);
 				free(tmp_ups);
 				tmp_ups = NULL;
