@@ -2,7 +2,7 @@
 all: primary daemon rest
 
 SCHED_CFLAGS  += -Wall -Werror -O2
-SCHED_LDFLAGS := -lpthread
+SCHED_LDFLAGS := -pthread
 
 primary: primary.o common.o
 	$(CC) $(SCHED_LDFLAGS) $^ -o $@

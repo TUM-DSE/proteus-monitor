@@ -20,8 +20,10 @@
 #define FRONT_CMD_LEN	400
 
 //#define TIME_NCOM 1
-//#define TIME_TASK 1
+#define TIME_TASK 1
 //#define TIME_ALGO 1
+
+struct timespec overall_start;
 
 /*
  * The state of a task. For the time being
@@ -947,8 +949,9 @@ static void scheduler_algorithm(struct node *nhead, struct task *thead,
 			break;
 #endif
 		}
-		if ((tsk_tmp->state == ready) && !tsk_avail)
+		if ((tsk_tmp->state == ready) && !tsk_avail) {
 			tsk_avail = tsk_tmp;
+		}
 		tsk_tmp = tsk_tmp->next;
 	}
 #if !defined(TIME_NCOM) && !defined(TIME_ALGO) && !defined (TIME_TASK)
@@ -985,7 +988,7 @@ static void scheduler_algorithm(struct node *nhead, struct task *thead,
 
 int main()
 {
-	uint32_t nr_tsks = 1;
+	uint32_t nr_tsks = 0;
 	struct node *node_head = NULL, *node_last = NULL;
 	struct task *htsk_head = NULL, *htsk_last = NULL;
 	struct task *ltsk_head = NULL, *ltsk_last = NULL;
@@ -1071,7 +1074,7 @@ int main()
 				if (node_head == NULL) {
 					node_head = new_msg->node;
 					node_last = new_msg->node;
-					node_last->id = 1;
+					node_last->id = 0;
 				} else {
 					new_msg->node->id = node_last->id + 1;
 					node_last->next = new_msg->node;
@@ -1080,6 +1083,9 @@ int main()
 				break;
 			case task_new:
 				new_msg->tsk->id = nr_tsks++;
+				if (new_msg->tsk->id == 0) {
+					clock_gettime(CLOCK_MONOTONIC, &overall_start);
+				}
 
 				if (new_msg->tsk->priority == 0)
 					insert_task(&htsk_head, &htsk_last,
@@ -1136,6 +1142,11 @@ int main()
 #else
 				printf("\n");
 #endif
+				if (htsk_head == NULL) {
+					long s = end.tv_sec - overall_start.tv_sec;
+					long ns = end.tv_nsec - overall_start.tv_nsec;
+					printf(" Overall till 200 tasks %ld ms\n", s*1000 + ns/1000000);
+				}
 				free(task_tmp->bin_path);
 				free(task_tmp->bin_args);
 				free(task_tmp);
@@ -1183,7 +1194,6 @@ int main()
 #endif
 		if (!tsk_avail || !node_avail)
 			continue;
-		printf("task %d node %d\n", tsk_avail->id, node_avail->id);
 		/*
 		 * Deploy
 		 */
@@ -1226,6 +1236,7 @@ int main()
 			node_avail->ev_task = node_avail->task;
 		}
 		node_avail->task = tsk_avail;
+		printf("task %d node %d\n", tsk_avail->id, node_avail->id);
 	}
 
 	return 0;
