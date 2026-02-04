@@ -952,7 +952,7 @@ static void scheduler_algorithm(struct node *nhead, struct task *thead,
 		if ((tsk_tmp->state == ready) && !tsk_avail) {
 			node_tmp = nhead;
 			while(node_tmp) {
-				if ((tsk_tmp->id % 2)  == node_tmp->id) {
+				if ((tsk_tmp->id % 4)  == node_tmp->id) {
 					if ((node_tmp->state == available) && !node_avail) {
 						node_avail = node_tmp;
 						tsk_avail = tsk_tmp;
