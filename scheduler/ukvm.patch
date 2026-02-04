@@ -1,0 +1,34 @@
+diff --git a/ukvm/funky_backend_context.hpp b/ukvm/funky_backend_context.hpp
+index 7a8d90c..62732eb 100644
+--- a/ukvm/funky_backend_context.hpp
++++ b/ukvm/funky_backend_context.hpp
+@@ -875,11 +875,13 @@ namespace funky_backend {
+         for (; i < devices.size(); i++) {
+           devices[i].getInfo(CL_DEVICE_NAME, &device_name);
+           if (device_name == required_name) {
+-            DEBUG_STREAM("Found device " << required_name);
++            DEBUG_STREAM("Found " << i << " device " << required_name);
+             device = devices[i];
+             break;
+           }
+         }
++        device = devices[1];
++        DEBUG_STREAM("but setting to 1");
+ 
+         if (i == devices.size()) {
+           std::cerr << "Failed to find device " << required_name << "\n";
+diff --git a/ukvm/funky_backend_worker.hpp b/ukvm/funky_backend_worker.hpp
+index c108e01..9f8c78e 100644
+--- a/ukvm/funky_backend_worker.hpp
++++ b/ukvm/funky_backend_worker.hpp
+@@ -322,8 +322,8 @@ namespace funky_backend {
+       {
+         // The bitstream received from the guest in `hypercall_fpgainit` is ignored in favor of
+         // the bitstream put here by the scheduler.
+-        std::cout << "UKVM: using bitstream /tmp/bitstream_0.ukvm\n";
+-        int fd = open("/tmp/bitstream_0.ukvm", O_RDONLY);
++        std::cout << "UKVM: using bitstream /tmp/bitstream_1.ukvm\n";
++        int fd = open("/tmp/bitstream_1.ukvm", O_RDONLY);
+         if (fd < 0) {
+           perror("Opening file");
+           exit(EXIT_FAILURE);

@@ -338,7 +338,7 @@ static struct ukvm_ps *msg_from_primary(int socket, int *ret)
 		ps_ukvm->id = node_com.tsk.id;
 		const char *link_path = "/tmp/bitstream_0.ukvm";
 		unlink(link_path);
-		if (ps_ukvm->id % 2 == 0) {
+		if (((ps_ukvm->id / 2) % 2) == 0) {
 			const char *target = "/tmp/rosetta_50";
 			if (symlink(target, link_path) != 0) {
 				perror("symlink");

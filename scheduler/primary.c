@@ -950,7 +950,17 @@ static void scheduler_algorithm(struct node *nhead, struct task *thead,
 #endif
 		}
 		if ((tsk_tmp->state == ready) && !tsk_avail) {
-			tsk_avail = tsk_tmp;
+			node_tmp = nhead;
+			while(node_tmp) {
+				if ((tsk_tmp->id % 2)  == node_tmp->id) {
+					if ((node_tmp->state == available) && !node_avail) {
+						node_avail = node_tmp;
+						tsk_avail = tsk_tmp;
+						goto skip_nodes;
+					}
+				}
+				node_tmp = node_tmp->next;
+			}
 		}
 		tsk_tmp = tsk_tmp->next;
 	}
@@ -976,6 +986,7 @@ static void scheduler_algorithm(struct node *nhead, struct task *thead,
 #if !defined(TIME_NCOM) && !defined(TIME_ALGO) && !defined (TIME_TASK)
 	printf("----------------------------------------\n");
 #endif
+skip_nodes:
 	*pick_n = node_avail;
 	*pick_t = tsk_avail;
 	if (!tsk_avail)
