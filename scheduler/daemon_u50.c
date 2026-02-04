@@ -29,7 +29,6 @@
 //#define TIME_MIG 1
 
 static struct in_addr to_node;
-int tap_id = 0;
 
 struct ukvm_ps {
 	pid_t pid;
@@ -148,7 +147,7 @@ static void transmit_mig_file(int id)
 
 	memcpy(&addr.sin_addr, &to_node, sizeof(struct in_addr));
 	addr.sin_family = AF_INET;
-	addr.sin_port = htons(PORT_NODES+tap_id+1);
+	addr.sin_port = htons(PORT_NODES+1);
 	sockfd = setup_socket(0, (struct sockaddr *) &addr, 0);
 	if (sockfd == -1) {
 		err_print("socket error %d\n", errno);
@@ -216,7 +215,7 @@ static int start_guest(const char *mig_arg, const char *guest_bin,
 				mig_arg, mon_arg, guest_bin, (char *)NULL);
 		else
 			execl(ukvm_bin, ukvm_bin, mem_arg, net_arg, disk_arg,
-				"--fpga=u280", guest_bin, args, (char *)NULL);
+				"--fpga=u50", guest_bin, args, (char *)NULL);
 	} else if (pid == -1) {
 		perror("fork");
 		return -1;
@@ -333,20 +332,19 @@ static struct ukvm_ps *msg_from_primary(int socket, int *ret)
 		if (!buf)
 			goto ret_1;
 
-		sprintf(ps_ukvm->binary, "/tmp/binary_%d.ukvm", tap_id);
-		sprintf(ps_ukvm->socket, "--mon=/tmp/ukvm%d.sock", tap_id);
+		sprintf(ps_ukvm->binary, "/tmp/binary_0.ukvm");
+		sprintf(ps_ukvm->socket, "--mon=/tmp/ukvm0.sock");
 		ps_ukvm->id = node_com.tsk.id;
-		char link_path[32];
-		sprintf(link_path, "/tmp/bitstream_%d.ukvm", tap_id);
+		const char *link_path = "/tmp/bitstream_0.ukvm";
 		unlink(link_path);
 		if (((ps_ukvm->id / 4) % 2) == 0) {
-			const char *target = "/tmp/rosetta_280";
+			const char *target = "/tmp/rosetta_50";
 			if (symlink(target, link_path) != 0) {
 				perror("symlink");
 				goto ret_1;
 			}
 		} else {
-			const char *target = "/tmp/vitis_280";
+			const char *target = "/tmp/vitis_50";
 			if (symlink(target, link_path) != 0) {
 				perror("symlink");
 				goto ret_1;
@@ -361,9 +359,7 @@ static struct ukvm_ps *msg_from_primary(int socket, int *ret)
 		if (rc < 0)
 			goto ret_1;
 		// start new task
-		char net_arg[32];
-		sprintf(net_arg, "--net=tap%d", tap_id);
-		ps_ukvm->pid = start_guest(NULL, ps_ukvm->binary, net_arg,
+		ps_ukvm->pid = start_guest(NULL, ps_ukvm->binary, "--net=tap0",
 					   ps_ukvm->socket, args);
 		if (ps_ukvm->pid < 0)
 			goto ret_1;
@@ -504,7 +500,7 @@ static struct ukvm_ps *rcv_start_migrated_guest(int server_soc)
 	sprintf(ps_ukvm->binary, "/tmp/rcvd_file.ukvm");
 	sprintf(ps_ukvm->mig_file, "--load=/tmp/file.mig");
 	sprintf(ps_ukvm->socket, "--mon=/tmp/ukvm1.sock");
-	sprintf(ps_ukvm->net, "--net=tap%d", tap_id);
+	sprintf(ps_ukvm->net, "--net=tap1");
 	/*
 	 * The first file is the binary
 	 * The second file is the migration file
@@ -570,7 +566,7 @@ int main(int argc, char *argv[])
 	/*
 	 * Get ip address and port of the primary scheduler
 	 */
-	rc = getopt(argc, argv, "hi:p:t:");
+	rc = getopt(argc, argv, "hi:p:");
 	while (rc != -1) {
 		switch(rc) {
 		case 'h':
@@ -581,9 +577,6 @@ int main(int argc, char *argv[])
 			break;
 		case 'p':
 			port = atoi(optarg);
-			break;
-		case 't':
-			tap_id = atoi(optarg);
 			break;
 		case '?':
 			fprintf(stderr,"Unknown option %c\n", optopt);
@@ -623,7 +616,7 @@ int main(int argc, char *argv[])
 	 * Setup socket for communication between daemons (for migration)
 	 */
 	sockaddr.sin_addr.s_addr = htonl(INADDR_ANY);
-	sockaddr.sin_port = htons(PORT_NODES+tap_id);
+	sockaddr.sin_port = htons(PORT_NODES);
 	server_soc = setup_socket(epollfd, (struct sockaddr *) &sockaddr, 1);
 	if (server_soc < 0) {
 		err_print("Could not setup_socket for inter node communication\n");
