@@ -25,4 +25,4 @@ rest: rest.go
 .PHONY: clean
 
 clean:
-	rm -f primary daemon rest *.o
+	rm -f primary daemon daemon_u50 rest *.o
