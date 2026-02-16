@@ -589,7 +589,7 @@ int main(int argc, char *argv[])
 			fprintf(stderr,"Unknown option %c\n", optopt);
 			exit(EXIT_FAILURE);
 		}
-		rc = getopt(argc, argv, "hi:p:");
+		rc = getopt(argc, argv, "hi:p:t:");
 	}
 	if (!port || !ip_addr) {
 		printf("Usage: %s -i <ip_address> -p <port>\n", argv[0]);
